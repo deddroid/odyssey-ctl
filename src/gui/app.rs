@@ -1,63 +1,65 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, ColorImage, RichText};
+use eframe::egui::{self, Align, Color32, ColorImage, Layout, RichText, Stroke, Vec2};
 use odyssey_ctl::caps::{Capabilities, Profile};
 use odyssey_ctl::ddc::VcpValue;
-use odyssey_ctl::features::{self, Feature, Status};
+use odyssey_ctl::features::{self, Feature, SyncState};
 
 use crate::i18n::{Lang, tr};
 use crate::settings::Settings;
+use crate::theme::{self, ACCENT, ERR, OK, TEXT_DIM, WARN, dim};
 use crate::worker::{Reply, Request, Worker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+enum Page {
     Picture,
     Game,
     Lighting,
     Source,
-    Info,
+    Monitor,
+    Settings,
 }
 
-impl Tab {
-    const ALL: [Tab; 5] = [Tab::Picture, Tab::Game, Tab::Lighting, Tab::Source, Tab::Info];
+impl Page {
+    const ALL: [Page; 6] = [Page::Picture, Page::Game, Page::Lighting, Page::Source, Page::Monitor, Page::Settings];
 
     fn slug(self) -> &'static str {
         match self {
-            Tab::Picture => "picture",
-            Tab::Game => "game",
-            Tab::Lighting => "lighting",
-            Tab::Source => "source",
-            Tab::Info => "info",
+            Page::Picture => "picture",
+            Page::Game => "game",
+            Page::Lighting => "lighting",
+            Page::Source => "source",
+            Page::Monitor => "monitor",
+            Page::Settings => "settings",
         }
     }
 
-    fn features(self) -> &'static [&'static str] {
+    fn icon(self) -> &'static str {
         match self {
-            Tab::Picture => &[
-                "picture-mode", "brightness", "contrast", "sharpness", "color-tone", "eye-saver",
-                "red-gain", "green-gain", "blue-gain",
-            ],
-            Tab::Game => &["black-equalizer", "adaptive-sync", "aim-point"],
-            Tab::Lighting => &["lighting", "lighting-effect", "lighting-color"],
-            Tab::Source => &["input", "volume", "mute", "pip", "pip-source", "pip-sound", "pc-av-mode", "language"],
-            Tab::Info => &[],
+            Page::Picture => "◐",
+            Page::Game => "◎",
+            Page::Lighting => "✦",
+            Page::Source => "⇄",
+            Page::Monitor => "▣",
+            Page::Settings => "⚙",
         }
     }
 }
 
-/// Status line; translated when drawn so it follows language changes.
+/// Status line under the page title; translated when drawn so it follows language changes.
 enum Message {
-    Loaded,
-    Info(String),
+    Loaded(Instant),
+    Info(String, Instant),
     Error(String),
 }
 
-/// `ODYSSEY_CTL_SCREENSHOTS=<dir>`: capture every tab in every language, then quit.
+/// `ODYSSEY_CTL_SCREENSHOTS=<dir>`: capture every page in every language, then quit.
 struct Screenshots {
     dir: PathBuf,
-    steps: Vec<(Lang, Tab)>,
+    steps: Vec<(Lang, Page)>,
     index: usize,
     frames: u32,
     requested: bool,
@@ -68,12 +70,14 @@ struct Screenshots {
 pub struct App {
     worker: Worker,
     settings: Settings,
-    tab: Tab,
+    page: Page,
+    name: Option<String>,
     caps: Option<Capabilities>,
     values: BTreeMap<u8, Result<VcpValue, String>>,
     /// Slider values being dragged, sent to the monitor on release.
     drafts: BTreeMap<u8, u16>,
     pending: usize,
+    connected: bool,
     message: Option<Message>,
     demo: bool,
     shots: Option<Screenshots>,
@@ -81,19 +85,22 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, bus: Option<u32>, screenshots: Option<PathBuf>) -> Self {
+        theme::apply(&cc.egui_ctx);
         let shots = screenshots.map(|dir| {
             let (tx, rx) = mpsc::channel();
-            let steps = Lang::ALL.iter().flat_map(|&l| Tab::ALL.map(|t| (l, t))).collect();
+            let steps = Lang::ALL.iter().flat_map(|&l| Page::ALL.map(|p| (l, p))).collect();
             Screenshots { dir, steps, index: 0, frames: 0, requested: false, tx, rx }
         });
         let mut app = App {
             worker: Worker::spawn(cc.egui_ctx.clone(), bus),
             settings: Settings::load(),
-            tab: Tab::Picture,
+            page: Page::Picture,
+            name: None,
             caps: None,
             values: BTreeMap::new(),
             drafts: BTreeMap::new(),
             pending: 0,
+            connected: false,
             message: None,
             demo: std::env::var("ODYSSEY_CTL_DEMO").is_ok_and(|v| v == "1"),
             shots,
@@ -117,6 +124,11 @@ impl App {
         }
     }
 
+    fn reading(&self, name: &str) -> Option<VcpValue> {
+        let f = features::find(name)?;
+        self.values.get(&f.code)?.as_ref().ok().copied()
+    }
+
     fn request(&mut self, r: Request) {
         self.pending += 1;
         self.worker.send(r);
@@ -134,15 +146,17 @@ impl App {
         while let Some(reply) = self.worker.try_recv() {
             self.pending = self.pending.saturating_sub(1);
             match reply {
-                Reply::Loaded { caps, readings } => {
-                    match caps {
-                        Ok(c) => self.caps = Some(c),
-                        Err(e) => self.message = Some(Message::Error(e)),
-                    }
+                Reply::Loaded { name, caps, readings } => {
+                    self.connected = true;
+                    self.name = name;
                     self.values = readings.into_iter().map(|r| (r.feature.code, r.value)).collect();
                     self.drafts.clear();
-                    if !matches!(self.message, Some(Message::Error(_))) {
-                        self.message = Some(Message::Loaded);
+                    match caps {
+                        Ok(c) => {
+                            self.caps = Some(c);
+                            self.message = Some(Message::Loaded(Instant::now()));
+                        }
+                        Err(e) => self.message = Some(Message::Error(e)),
                     }
                 }
                 Reply::Written { feature, result } => {
@@ -153,12 +167,18 @@ impl App {
                                 v.current = c.after;
                             }
                             let text = format!(
-                                "{}: {} -> {}",
+                                "{}: {} → {}",
                                 self.feature_label(feature),
                                 self.value_text(feature, c.before),
                                 self.value_text(feature, c.after)
                             );
-                            self.message = Some(Message::Info(text));
+                            self.message = Some(Message::Info(text, Instant::now()));
+                            // These change other settings or lock/unlock them: re-read everything.
+                            const AFFECTS_OTHERS: [&str; 5] =
+                                ["picture-mode", "eye-saver", "lighting", "lighting-effect", "pc-av-mode"];
+                            if AFFECTS_OTHERS.contains(&feature.name) {
+                                self.request(Request::Load);
+                            }
                         }
                         Err(e) => {
                             self.message = Some(Message::Error(e));
@@ -168,10 +188,14 @@ impl App {
                 }
                 Reply::Sdm(Ok((eb, caps))) => {
                     let model = caps.model.clone().unwrap_or_default();
-                    self.message = Some(Message::Info(format!("EB = {eb:#04x}, {model}")));
+                    self.message = Some(Message::Info(format!("EB = {eb:#04x} · {model}"), Instant::now()));
                     self.caps = Some(caps);
                 }
-                Reply::Sdm(Err(e)) | Reply::Failed(e) => self.message = Some(Message::Error(e)),
+                Reply::Sdm(Err(e)) => self.message = Some(Message::Error(e)),
+                Reply::Failed(e) => {
+                    self.connected = false;
+                    self.message = Some(Message::Error(e));
+                }
             }
         }
     }
@@ -183,8 +207,8 @@ impl App {
             return; // wait for the monitor data
         }
         if let Ok(image) = s.rx.try_recv() {
-            let (lang, tab) = s.steps[s.index];
-            let path = s.dir.join(format!("{:02}_{}_{}.png", s.index, lang.code(), tab.slug()));
+            let (lang, page) = s.steps[s.index];
+            let path = s.dir.join(format!("{:02}_{}_{}.png", s.index, lang.code(), page.slug()));
             let [w, h] = image.size;
             if let Err(e) = image::save_buffer(&path, image.as_raw(), w as u32, h as u32, image::ColorType::Rgba8) {
                 eprintln!("{}: {e}", path.display());
@@ -193,12 +217,12 @@ impl App {
             s.frames = 0;
             s.requested = false;
         }
-        let Some(&(lang, tab)) = s.steps.get(s.index) else {
+        let Some(&(lang, page)) = s.steps.get(s.index) else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         };
         self.settings.language = lang;
-        self.tab = tab;
+        self.page = page;
         s.frames += 1;
         if s.frames >= 5 && !s.requested {
             s.requested = true;
@@ -211,14 +235,63 @@ impl App {
         }
     }
 
-    fn header(&mut self, ui: &mut egui::Ui) {
+    // ---- frame -------------------------------------------------------------
+
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(14.0);
         ui.horizontal(|ui| {
-            ui.heading("Samsung Odyssey");
-            if let Some(model) = self.caps.as_ref().and_then(|c| c.model.as_deref()) {
-                ui.label(RichText::new(model).weak());
+            ui.add_space(6.0);
+            ui.label(RichText::new("Odyssey Control").strong().size(18.0).color(Color32::WHITE));
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            ui.label(dim(self.name.clone().unwrap_or_else(|| "Samsung Odyssey".into())));
+        });
+        ui.add_space(14.0);
+        for page in Page::ALL {
+            let selected = self.page == page;
+            let text = RichText::new(format!("{}   {}", page.icon(), self.t(&format!("nav.{}", page.slug()))))
+                .size(15.0)
+                .color(if selected { Color32::WHITE } else { TEXT_DIM });
+            let button = egui::Button::new(text)
+                .fill(if selected { theme::ACCENT_SOFT } else { Color32::TRANSPARENT })
+                .stroke(if selected { Stroke::new(1.0, ACCENT) } else { Stroke::NONE })
+                .min_size(Vec2::new(ui.available_width(), 36.0));
+            if ui.add(button).clicked() {
+                self.page = page;
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("refresh"))).clicked() {
+        }
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            ui.add_space(12.0);
+            if let Some(model) = self.caps.as_ref().and_then(|c| c.model.clone()) {
+                ui.horizontal(|ui| {
+                    ui.add_space(6.0);
+                    ui.label(dim(format!("{} {model}", self.t("row.profile"))));
+                });
+            }
+            let (color, text) = if self.pending > 0 {
+                (WARN, self.t("busy"))
+            } else if self.demo {
+                (ACCENT, self.t("demo_mode"))
+            } else if self.connected {
+                (OK, self.t("connected"))
+            } else {
+                (ERR, self.t("disconnected"))
+            };
+            ui.horizontal(|ui| {
+                ui.add_space(6.0);
+                ui.label(RichText::new("●").color(color));
+                ui.label(RichText::new(text).color(TEXT_DIM));
+            });
+        });
+    }
+
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading(self.t(&format!("nav.{}", self.page.slug())));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let refresh = egui::Button::new(format!("⟳ {}", self.t("refresh")));
+                if ui.add_enabled(self.pending == 0, refresh).clicked() {
                     self.request(Request::Load);
                 }
                 if self.pending > 0 {
@@ -226,129 +299,58 @@ impl App {
                 }
             });
         });
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                let label = self.t(&format!("tab.{}", tab.slug()));
-                ui.selectable_value(&mut self.tab, tab, label);
+        let mut clear = false;
+        match &self.message {
+            Some(Message::Loaded(at)) if at.elapsed() < Duration::from_secs(5) => {
+                ui.label(RichText::new(self.t("loaded")).color(OK).small());
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
             }
-        });
+            Some(Message::Info(text, at)) if at.elapsed() < Duration::from_secs(5) => {
+                ui.label(RichText::new(text).color(OK).small());
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
+            }
+            Some(Message::Error(text)) => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(text).color(ERR).small());
+                    clear = ui.small_button("✕").clicked();
+                });
+            }
+            _ => {
+                ui.label(RichText::new(" ").small());
+            }
+        }
+        if clear {
+            self.message = None;
+        }
         ui.add_space(4.0);
     }
 
-    fn status_bar(&self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if self.pending > 0 {
-                ui.label(self.t("busy"));
-            } else {
-                match &self.message {
-                    Some(Message::Loaded) => {
-                        ui.label(self.t("loaded"));
-                    }
-                    Some(Message::Info(s)) => {
-                        ui.label(s);
-                    }
-                    Some(Message::Error(s)) => {
-                        ui.colored_label(Color32::from_rgb(230, 90, 80), s);
-                    }
-                    None => {}
-                }
-            }
-            if self.demo {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(self.t("demo")).weak());
-                });
-            }
-        });
-    }
+    // ---- controls ----------------------------------------------------------
 
-    fn feature_grid(&mut self, ui: &mut egui::Ui, tab: Tab) {
-        let locked = tab
-            .features()
-            .iter()
-            .filter_map(|n| features::find(n))
-            .any(|f| !f.read_only && !f.status.safe_to_write());
-        if locked && !self.settings.allow_unverified {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(self.t("locked_banner")).color(Color32::from_rgb(230, 140, 70)));
-                if ui.button(self.t("unlock")).clicked() {
-                    self.settings.allow_unverified = true;
-                    self.save_settings();
-                }
-            });
-            ui.add_space(6.0);
-        }
-        egui::Grid::new(tab.slug()).num_columns(3).spacing([18.0, 12.0]).striped(true).show(ui, |ui| {
-            for name in tab.features() {
-                let f = features::find(name).expect("tab lists known features");
-                self.feature_row(ui, f);
-                ui.end_row();
-            }
-        });
-    }
-
-    fn feature_row(&mut self, ui: &mut egui::Ui, f: &'static Feature) {
-        ui.label(self.feature_label(f));
+    /// The right control for a feature (chips, toggle, slider or list), with the lock and
+    /// "disabled now" states. Writes go to the worker.
+    fn control(&mut self, ui: &mut egui::Ui, name: &str) {
+        let f = features::find(name).expect("pages use known features");
         let allowed = f.status.safe_to_write() || self.settings.allow_unverified;
         let enabled = allowed && self.pending == 0;
         let mut write = None;
         match self.values.get(&f.code).cloned() {
             None => {
-                ui.label(RichText::new(self.t("no_data")).weak());
+                ui.label(dim(self.t("no_data")));
             }
             Some(Err(_)) => {
-                ui.label(RichText::new(self.t("not_supported")).weak());
+                ui.label(dim(self.t("not_supported")));
             }
             Some(Ok(v)) if features::is_disabled(v.current, v.max) => {
-                ui.label(RichText::new(self.t("disabled_now")).weak());
-            }
-            Some(Ok(v)) if f.read_only => {
-                ui.label(format!("{} {} ({:#06x})", self.t("raw_value"), v.current, v.current))
-                    .on_hover_text(self.t("raw_hint"));
-            }
-            Some(Ok(v)) if !f.values.is_empty() => {
-                let mut selected = v.current;
-                ui.add_enabled_ui(enabled, |ui| {
-                    egui::ComboBox::from_id_salt(f.code)
-                        .width(200.0)
-                        .selected_text(self.value_text(f, v.current))
-                        .show_ui(ui, |ui| {
-                            for &(value, _) in f.values.iter().filter(|(value, _)| *value <= v.max) {
-                                ui.selectable_value(&mut selected, value, self.value_text(f, value));
-                            }
-                        });
-                });
-                if selected != v.current {
-                    write = Some(selected);
-                }
-            }
-            Some(Ok(v)) if v.max > 0 && v.current <= v.max => {
-                let mut value = self.drafts.get(&f.code).copied().unwrap_or(v.current);
-                let r = ui.add_enabled(enabled, egui::Slider::new(&mut value, 0..=v.max));
-                if r.changed() {
-                    self.drafts.insert(f.code, value);
-                }
-                if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                    if value != v.current {
-                        write = Some(value);
-                    } else {
-                        self.drafts.remove(&f.code);
-                    }
-                }
+                ui.label(dim(self.t("disabled_now")));
             }
             Some(Ok(v)) => {
-                ui.label(format!("{} {} ({:#06x})", self.t("raw_value"), v.current, v.current))
-                    .on_hover_text(self.t("raw_hint"));
+                ui.add_enabled_ui(enabled, |ui| write = self.editor(ui, f, v));
             }
         }
-        let color = match f.status {
-            Status::Verified => Color32::from_rgb(110, 190, 120),
-            Status::Standard => Color32::from_rgb(130, 160, 200),
-            Status::ReadVerified => Color32::from_rgb(220, 190, 90),
-            Status::Unverified => Color32::from_rgb(230, 140, 70),
-        };
-        let badge = ui.label(RichText::new(self.t(&format!("status.{}", f.status.as_str()))).small().color(color));
         if !allowed {
-            badge.on_hover_text(self.t("locked_hint"));
+            ui.label(RichText::new(format!("⚠ {}", self.t("locked"))).small().color(WARN))
+                .on_hover_text(self.t("locked_hint"));
         }
         if let Some(value) = write {
             let allow_unverified = self.settings.allow_unverified;
@@ -356,65 +358,251 @@ impl App {
         }
     }
 
-    fn info(&mut self, ui: &mut egui::Ui) {
-        ui.heading(self.t("monitor"));
-        if let Some(caps) = &self.caps {
-            egui::Grid::new("caps").num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
-                ui.label(self.t("model"));
+    fn editor(&mut self, ui: &mut egui::Ui, f: &'static Feature, v: VcpValue) -> Option<u16> {
+        // "Reset position" of the aim point is an action, not a state: not offered yet.
+        let values: Vec<(u16, &str)> =
+            f.values.iter().copied().filter(|&(x, n)| x <= v.max && n != "reset-position").collect();
+        let is_switch = values.len() == 2 && values[0].1 == "off" && values[1].1 == "on";
+        if is_switch {
+            let mut on = v.current & 1 == 1;
+            return theme::toggle(ui, &mut on).changed().then_some(u16::from(on));
+        }
+        if !values.is_empty() && values.len() <= 10 {
+            let mut chosen = None;
+            ui.horizontal_wrapped(|ui| {
+                for &(x, _) in &values {
+                    if theme::chip(ui, v.current == x, &self.value_text(f, x)) && x != v.current {
+                        chosen = Some(x);
+                    }
+                }
+            });
+            return chosen;
+        }
+        if !values.is_empty() {
+            let mut selected = v.current;
+            egui::ComboBox::from_id_salt(f.code)
+                .width(220.0)
+                .selected_text(self.value_text(f, v.current))
+                .show_ui(ui, |ui| {
+                    for &(x, _) in &values {
+                        ui.selectable_value(&mut selected, x, self.value_text(f, x));
+                    }
+                });
+            return (selected != v.current).then_some(selected);
+        }
+        if v.max > 0 && v.current <= v.max {
+            let mut value = self.drafts.get(&f.code).copied().unwrap_or(v.current);
+            let r = ui.add(egui::Slider::new(&mut value, 0..=v.max));
+            if r.changed() {
+                self.drafts.insert(f.code, value);
+            }
+            if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                if value != v.current {
+                    return Some(value);
+                }
+                self.drafts.remove(&f.code);
+            }
+            return None;
+        }
+        ui.label(dim(format!("{} {:#06x}", self.t("raw_value"), v.current)));
+        None
+    }
+
+    fn feature_row(&mut self, ui: &mut egui::Ui, name: &str) {
+        let label = features::find(name).map(|f| self.feature_label(f)).unwrap_or_default();
+        theme::row(ui, &label, |ui| self.control(ui, name));
+    }
+
+    // ---- pages -------------------------------------------------------------
+
+    fn page_picture(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.mode"), self.t("card.mode.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| self.control(ui, "picture-mode"));
+        let title = self.t("card.basic");
+        theme::card(ui, &title, None, |ui| {
+            for name in ["brightness", "contrast", "sharpness"] {
+                self.feature_row(ui, name);
+            }
+        });
+        let (title, hint) = (self.t("card.color"), self.t("card.color.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            for name in ["color-tone", "red-gain", "green-gain", "blue-gain"] {
+                self.feature_row(ui, name);
+            }
+        });
+        let (title, hint) = (self.t("card.comfort"), self.t("card.comfort.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| self.feature_row(ui, "eye-saver"));
+    }
+
+    fn page_game(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.black_eq"), self.t("card.black_eq.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            let label = self.t("row.level");
+            theme::row(ui, &label, |ui| self.control(ui, "black-equalizer"));
+        });
+        let (title, hint) = (self.t("card.aim"), self.t("card.aim.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| self.control(ui, "aim-point"));
+        let (title, hint) = (self.t("card.sync"), self.t("card.sync.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| match self.reading("adaptive-sync") {
+            Some(v) => {
+                let sync = features::decode_adaptive_sync(v.current);
+                let state = match sync.state {
+                    SyncState::Off => self.t("sync.off"),
+                    SyncState::On => self.t("sync.on"),
+                    SyncState::Disabled => self.t("disabled_now"),
+                };
+                let kind = if sync.freesync { "FreeSync Premium Pro" } else { "Adaptive-Sync" };
+                theme::row(ui, &self.t("row.state"), |ui| {
+                    ui.label(state);
+                });
+                theme::row(ui, &self.t("row.type"), |ui| {
+                    ui.label(kind);
+                });
+            }
+            None => {
+                ui.label(dim(self.t("not_supported")));
+            }
+        });
+    }
+
+    fn page_lighting(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.lighting"), self.t("card.lighting.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            for (key, name) in [("row.lighting", "lighting"), ("row.effect", "lighting-effect"), ("row.colour", "lighting-color")] {
+                let label = self.t(key);
+                theme::row(ui, &label, |ui| self.control(ui, name));
+            }
+            ui.label(dim(self.t("row.colour.hint")));
+        });
+    }
+
+    fn page_source(&mut self, ui: &mut egui::Ui) {
+        let title = self.t("card.input");
+        theme::card(ui, &title, None, |ui| {
+            let label = self.t("row.input");
+            theme::row(ui, &label, |ui| self.control(ui, "input"));
+        });
+        let title = self.t("card.audio");
+        theme::card(ui, &title, None, |ui| {
+            let label = self.t("row.volume");
+            theme::row(ui, &label, |ui| self.control(ui, "volume"));
+        });
+        let (title, hint) = (self.t("card.pip"), self.t("card.pip.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| match self.reading("pip") {
+            Some(v) => {
+                let pip = features::decode_pip_status(v.current);
+                let state = self.t(if pip.on { "sync.on" } else { "sync.off" });
+                let supported = match (pip.pip_supported, pip.pbp_supported) {
+                    (true, true) => "PIP · PBP",
+                    (true, false) => "PIP",
+                    (false, true) => "PBP",
+                    (false, false) => "—",
+                };
+                theme::row(ui, &self.t("row.state"), |ui| {
+                    ui.label(state);
+                });
+                theme::row(ui, &self.t("row.supported"), |ui| {
+                    ui.label(supported);
+                });
+                if pip.on
+                    && let Some(src) = self.reading("pip-source")
+                {
+                    let [main, sub] = src.current.to_be_bytes();
+                    let text = format!(
+                        "{} {} · {} {}",
+                        self.t("row.main"),
+                        features::source_name(main).unwrap_or_default(),
+                        self.t("row.sub"),
+                        features::source_name(sub).unwrap_or_default()
+                    );
+                    theme::row(ui, &self.t("row.sources"), |ui| {
+                        ui.label(text);
+                    });
+                }
+                let label = self.t("row.pip_sound");
+                theme::row(ui, &label, |ui| self.control(ui, "pip-sound"));
+            }
+            None => {
+                ui.label(dim(self.t("not_supported")));
+            }
+        });
+        let title = self.t("card.osd");
+        theme::card(ui, &title, None, |ui| {
+            self.feature_row(ui, "language");
+            self.feature_row(ui, "pc-av-mode");
+        });
+    }
+
+    fn page_monitor(&mut self, ui: &mut egui::Ui) {
+        let title = self.t("card.monitor");
+        theme::card(ui, &title, None, |ui| {
+            let name = self.name.clone().unwrap_or_else(|| "—".into());
+            theme::row(ui, &self.t("row.name"), |ui| {
+                ui.label(name);
+            });
+            if let Some(caps) = self.caps.clone() {
                 let kind = match caps.profile() {
                     Profile::Lemon(_) => self.t("profile.lemon"),
                     Profile::Sec => self.t("profile.sec"),
                     Profile::Falcon => self.t("profile.falcon"),
                     Profile::Other(_) => String::new(),
                 };
-                ui.label(format!("{}  {kind}", caps.model.as_deref().unwrap_or("?")));
-                ui.end_row();
-                ui.label(self.t("mccs"));
-                ui.label(caps.mccs_version.as_deref().unwrap_or("?"));
-                ui.end_row();
-                ui.label(self.t("codes"));
-                let codes: Vec<String> = caps.vcp.keys().map(|c| format!("{c:02X}")).collect();
-                ui.add(egui::Label::new(RichText::new(codes.join(" ")).monospace()).wrap());
-                ui.end_row();
-            });
-            egui::CollapsingHeader::new(self.t("caps_raw")).show(ui, |ui| {
-                ui.add(egui::Label::new(RichText::new(&caps.raw).monospace().small()).wrap());
-            });
-        } else {
-            ui.label(RichText::new(self.t("no_data")).weak());
-        }
-
-        ui.separator();
-        ui.heading(self.t("sdm"));
-        ui.label(RichText::new(self.t("sdm_hint")).weak());
-        ui.horizontal(|ui| {
-            if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_on"))).clicked() {
-                self.request(Request::Sdm(true));
-            }
-            if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_off"))).clicked() {
-                self.request(Request::Sdm(false));
-            }
-        });
-
-        ui.separator();
-        ui.heading(self.t("app_settings"));
-        let mut changed = false;
-        ui.horizontal(|ui| {
-            ui.label(self.t("language"));
-            egui::ComboBox::from_id_salt("language")
-                .selected_text(self.settings.language.native_name())
-                .show_ui(ui, |ui| {
-                    for lang in Lang::ALL {
-                        changed |= ui.selectable_value(&mut self.settings.language, lang, lang.native_name()).changed();
-                    }
+                theme::row(ui, &self.t("row.profile"), |ui| {
+                    ui.label(caps.model.as_deref().unwrap_or("?"));
+                    ui.label(dim(kind));
                 });
+                theme::row(ui, &self.t("row.mccs"), |ui| {
+                    ui.label(caps.mccs_version.as_deref().unwrap_or("?"));
+                });
+                let codes: Vec<String> = caps.vcp.keys().map(|c| format!("{c:02X}")).collect();
+                theme::row(ui, &self.t("row.codes"), |ui| {
+                    ui.add(egui::Label::new(RichText::new(codes.join(" ")).monospace().small()).wrap());
+                });
+                egui::CollapsingHeader::new(self.t("caps_raw")).show(ui, |ui| {
+                    ui.add(egui::Label::new(RichText::new(&caps.raw).monospace().small()).wrap());
+                });
+            }
         });
-        let label = self.t("allow_unverified");
-        changed |= ui.checkbox(&mut self.settings.allow_unverified, label).changed();
-        ui.label(RichText::new(self.t("allow_unverified_hint")).weak());
-        if changed {
-            self.save_settings();
-        }
+        let (title, hint) = (self.t("card.sdm"), self.t("card.sdm.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            ui.horizontal(|ui| {
+                if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_on"))).clicked() {
+                    self.request(Request::Sdm(true));
+                }
+                if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_off"))).clicked() {
+                    self.request(Request::Sdm(false));
+                }
+            });
+        });
+    }
+
+    fn page_settings(&mut self, ui: &mut egui::Ui) {
+        let title = self.t("card.app");
+        theme::card(ui, &title, None, |ui| {
+            let mut changed = false;
+            theme::row(ui, &self.t("row.language"), |ui| {
+                egui::ComboBox::from_id_salt("app-language")
+                    .selected_text(self.settings.language.native_name())
+                    .show_ui(ui, |ui| {
+                        for lang in Lang::ALL {
+                            changed |= ui.selectable_value(&mut self.settings.language, lang, lang.native_name()).changed();
+                        }
+                    });
+            });
+            theme::row(ui, &self.t("row.unverified"), |ui| {
+                changed |= theme::toggle(ui, &mut self.settings.allow_unverified).changed();
+            });
+            ui.label(dim(self.t("unverified_hint")));
+            if changed {
+                self.save_settings();
+            }
+        });
+        let (title, hint) = (self.t("card.about"), self.t("card.about.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            theme::row(ui, &self.t("row.version"), |ui| {
+                ui.label(concat!("odyssey-ctl ", env!("CARGO_PKG_VERSION")));
+            });
+        });
     }
 }
 
@@ -423,13 +611,20 @@ impl eframe::App for App {
         self.poll_worker();
         let ctx = ui.ctx().clone();
         self.screenshot_step(&ctx);
-        egui::Panel::top("header").show(ui, |ui| self.header(ui));
-        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.spacing_mut().slider_width = 300.0;
-            egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
-                Tab::Info => self.info(ui),
-                tab => self.feature_grid(ui, tab),
+        egui::Panel::left("nav")
+            .resizable(false)
+            .exact_size(210.0)
+            .frame(egui::Frame::new().fill(theme::BG).inner_margin(egui::Margin::same(10)))
+            .show(ui, |ui| self.sidebar(ui));
+        egui::CentralPanel::default_margins().show(ui, |ui| {
+            self.top_bar(ui);
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| match self.page {
+                Page::Picture => self.page_picture(ui),
+                Page::Game => self.page_game(ui),
+                Page::Lighting => self.page_lighting(ui),
+                Page::Source => self.page_source(ui),
+                Page::Monitor => self.page_monitor(ui),
+                Page::Settings => self.page_settings(ui),
             });
         });
     }

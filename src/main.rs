@@ -77,11 +77,11 @@ fn run(cli: Cli) -> Result<(), Error> {
             print_features();
             Ok(())
         }
-        Command::Info => info(&mut *open(cli.bus)?),
-        Command::Get { features } => get(&mut *open(cli.bus)?, &features),
-        Command::Set { feature, value, unverified } => set(&mut *open(cli.bus)?, &feature, &value, unverified),
-        Command::Sdm { state } => sdm(&mut *open(cli.bus)?, state == "on"),
-        Command::Raw(raw) => raw_cmd(&mut *open(cli.bus)?, raw),
+        Command::Info => info(&mut *open(cli.bus)?.monitor),
+        Command::Get { features } => get(&mut *open(cli.bus)?.monitor, &features),
+        Command::Set { feature, value, unverified } => set(&mut *open(cli.bus)?.monitor, &feature, &value, unverified),
+        Command::Sdm { state } => sdm(&mut *open(cli.bus)?.monitor, state == "on"),
+        Command::Raw(raw) => raw_cmd(&mut *open(cli.bus)?.monitor, raw),
     }
 }
 

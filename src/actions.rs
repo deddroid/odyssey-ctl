@@ -11,30 +11,40 @@ use crate::{SDM_DISABLE, SDM_ENABLE, VCP_SDM_CONTROL};
 
 pub type Monitor = Box<dyn Vcp + Send>;
 
+pub struct Opened {
+    pub monitor: Monitor,
+    /// Product name from the EDID (e.g. "Odyssey G60SD"), when known.
+    pub name: Option<String>,
+}
+
 /// Opens the monitor on `bus`, or the first Samsung monitor found.
 /// `ODYSSEY_CTL_DEMO=1` returns an in-memory monitor instead.
-pub fn open(bus: Option<u32>) -> Result<Monitor, Error> {
+pub fn open(bus: Option<u32>) -> Result<Opened, Error> {
     if std::env::var("ODYSSEY_CTL_DEMO").is_ok_and(|v| v == "1") {
-        return Ok(Box::new(crate::demo::DemoDevice::new()));
+        let monitor: Monitor = Box::<crate::demo::DemoDevice>::default();
+        return Ok(Opened { monitor, name: Some("Odyssey G60SD (demo)".into()) });
     }
     open_platform(bus)
 }
 
 #[cfg(target_os = "linux")]
-fn open_platform(bus: Option<u32>) -> Result<Monitor, Error> {
-    let bus = match bus {
-        Some(b) => b,
-        None => crate::linux::discover()
-            .into_iter()
-            .find(|d| d.edid.is_samsung())
-            .map(|d| d.bus)
-            .ok_or_else(|| Error::Other("no Samsung monitor found (try `list` or --bus)".into()))?,
+fn open_platform(bus: Option<u32>) -> Result<Opened, Error> {
+    let displays = crate::linux::discover();
+    let display = match bus {
+        Some(b) => displays.into_iter().find(|d| d.bus == b),
+        None => displays.into_iter().find(|d| d.edid.is_samsung()),
     };
-    Ok(Box::new(crate::linux::open(bus)?))
+    let bus = match (bus, &display) {
+        (Some(b), _) => b,
+        (None, Some(d)) => d.bus,
+        (None, None) => return Err(Error::Other("no Samsung monitor found (try `list` or --bus)".into())),
+    };
+    let monitor: Monitor = Box::new(crate::linux::open(bus)?);
+    Ok(Opened { monitor, name: display.and_then(|d| d.edid.name) })
 }
 
 #[cfg(not(target_os = "linux"))]
-fn open_platform(_bus: Option<u32>) -> Result<Monitor, Error> {
+fn open_platform(_bus: Option<u32>) -> Result<Opened, Error> {
     Err(Error::Other("this platform is not supported yet".into()))
 }
 

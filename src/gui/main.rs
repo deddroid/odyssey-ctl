@@ -3,6 +3,7 @@
 mod app;
 mod i18n;
 mod settings;
+mod theme;
 mod worker;
 
 use std::path::PathBuf;
@@ -25,8 +26,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Odyssey Control")
             .with_app_id("odyssey-ctl")
-            .with_inner_size([820.0, 600.0])
-            .with_min_inner_size([620.0, 440.0]),
+            .with_inner_size([1000.0, 680.0])
+            .with_min_inner_size([760.0, 480.0]),
         ..Default::default()
     };
     eframe::run_native(

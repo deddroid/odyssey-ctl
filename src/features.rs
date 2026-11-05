@@ -53,6 +53,58 @@ pub fn is_disabled(current: u16, max: u16) -> bool {
     current == DISABLED && max < DISABLED
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncState {
+    Off,
+    On,
+    /// Not available in the current state.
+    Disabled,
+}
+
+/// Adaptive-Sync / FreeSync reading (VCP F2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdaptiveSync {
+    pub state: SyncState,
+    /// The monitor presents the feature as FreeSync rather than Adaptive-Sync.
+    pub freesync: bool,
+}
+
+/// F2: low nibble 0 off, 1 on, D disabled; high nibble 1 = FreeSync.
+pub fn decode_adaptive_sync(v: u16) -> AdaptiveSync {
+    let state = match v & 0xF {
+        1 => SyncState::On,
+        0xD => SyncState::Disabled,
+        _ => SyncState::Off,
+    };
+    AdaptiveSync { state, freesync: v & 0xF0 == 0x10 }
+}
+
+/// PIP/PBP status reading (VCP E2), the fields odyssey-ctl shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PipStatus {
+    pub on: bool,
+    pub pip_supported: bool,
+    pub pbp_supported: bool,
+}
+
+pub fn decode_pip_status(v: u16) -> PipStatus {
+    PipStatus { on: v & 1 != 0, pip_supported: v & 0x1000 != 0, pbp_supported: v & 0x2000 != 0 }
+}
+
+/// Name of a PIP/PBP source code (`type << 4 | n`, as in VCP E3).
+pub fn source_name(code: u8) -> Option<String> {
+    let kind = match code >> 4 {
+        0 => "HDMI",
+        1 => "DP",
+        2 => "USB-C",
+        3 => "Thunderbolt",
+        4 => "DVI",
+        5 => "D-SUB",
+        _ => return None,
+    };
+    Some(format!("{kind} {}", (code & 0xF) + 1))
+}
+
 impl Feature {
     pub fn value_name(&self, value: u16) -> Option<&'static str> {
         self.values.iter().find(|(v, _)| *v == value).map(|(_, n)| *n)
@@ -217,6 +269,20 @@ mod tests {
         assert_eq!(find("language").unwrap().value_name(5), Some("italian"));
         assert!(find("pip-source").unwrap().read_only);
         assert!(is_disabled(0xFD, 0x2F) && !is_disabled(0xFD, 0xFF) && !is_disabled(6, 10));
+    }
+
+    #[test]
+    fn decodes_packed_readings() {
+        // Readings from the real G60SD (fw 1006.0).
+        assert_eq!(decode_adaptive_sync(0x10), AdaptiveSync { state: SyncState::Off, freesync: true });
+        assert_eq!(decode_adaptive_sync(0x00), AdaptiveSync { state: SyncState::Off, freesync: false });
+        assert_eq!(decode_adaptive_sync(0x11).state, SyncState::On);
+        assert_eq!(decode_adaptive_sync(0x0D).state, SyncState::Disabled);
+        let pip = decode_pip_status(0x150E);
+        assert_eq!(pip, PipStatus { on: false, pip_supported: true, pbp_supported: false });
+        assert_eq!(source_name(0x00).as_deref(), Some("HDMI 1"));
+        assert_eq!(source_name(0x11).as_deref(), Some("DP 2"));
+        assert_eq!(source_name(0x70), None);
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub enum Request {
 }
 
 pub enum Reply {
-    Loaded { caps: Result<Capabilities, String>, readings: Vec<Reading> },
+    Loaded { name: Option<String>, caps: Result<Capabilities, String>, readings: Vec<Reading> },
     Written { feature: &'static Feature, result: Result<Change, String> },
     Sdm(Result<(u16, Capabilities), String>),
     Failed(String),
@@ -34,10 +34,18 @@ impl Worker {
         let (replies, rx) = mpsc::channel();
         thread::spawn(move || {
             let mut monitor: Option<Monitor> = None;
+            let mut name = None;
             for request in requests {
-                let reply = match monitor.take().map_or_else(|| actions::open(bus), Ok) {
+                let opened = match monitor.take() {
+                    Some(m) => Ok(m),
+                    None => actions::open(bus).map(|o| {
+                        name = o.name;
+                        o.monitor
+                    }),
+                };
+                let reply = match opened {
                     Ok(mut m) => {
-                        let reply = handle(&mut m, request);
+                        let reply = handle(&mut m, request, &name);
                         // Keep the connection unless it failed; it is reopened on the next request.
                         if !matches!(reply, Reply::Failed(_)) {
                             monitor = Some(m);
@@ -65,7 +73,7 @@ impl Worker {
     }
 }
 
-fn handle(m: &mut Monitor, request: Request) -> Reply {
+fn handle(m: &mut Monitor, request: Request, name: &Option<String>) -> Reply {
     match request {
         Request::Load => {
             let caps = m.capabilities().map(|s| Capabilities::parse(&s)).map_err(|e| e.to_string());
@@ -73,7 +81,7 @@ fn handle(m: &mut Monitor, request: Request) -> Reply {
             if caps.is_err() && readings.iter().all(|r| r.value.is_err()) {
                 return Reply::Failed(caps.err().unwrap_or_default());
             }
-            Reply::Loaded { caps, readings }
+            Reply::Loaded { name: name.clone(), caps, readings }
         }
         Request::Write { feature, value, allow_unverified } => Reply::Written {
             feature,
