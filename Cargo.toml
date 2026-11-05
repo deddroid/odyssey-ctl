@@ -1,0 +1,30 @@
+[package]
+name = "odyssey-ctl"
+version = "0.1.0"
+edition = "2024"
+description = "Control Samsung Odyssey monitors over DDC/CI"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = { version = "7.0.0", optional = true }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"], optional = true }
+image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+thiserror = "2.0.21"
+toml = { version = "1.2.0", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:serde", "dep:toml", "dep:dirs", "dep:image"]
+
+[[bin]]
+name = "odyssey-ctl"
+path = "src/main.rs"
+
+[[bin]]
+name = "odyssey-ctl-gui"
+path = "src/gui/main.rs"
+required-features = ["gui"]
