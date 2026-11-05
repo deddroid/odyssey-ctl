@@ -121,7 +121,7 @@ impl App {
             new_name: String::new(),
             confirm_delete: None,
         };
-        app.request(Request::Load);
+        app.load(true);
         app
     }
 
@@ -169,6 +169,15 @@ impl App {
         }
     }
 
+    /// Reads every feature, then the capability string (when missing, or always with `with_caps`).
+    /// Values arrive first, so the page fills before the slower capability read.
+    fn load(&mut self, with_caps: bool) {
+        self.request(Request::Read(features::FEATURES.iter().collect()));
+        if with_caps || self.caps.is_none() {
+            self.request(Request::Caps);
+        }
+    }
+
     fn save_settings(&mut self) {
         if self.shots.is_none()
             && let Err(e) = self.settings.save()
@@ -181,24 +190,20 @@ impl App {
         while let Some(reply) = self.worker.try_recv() {
             self.in_flight.pop_front();
             match reply {
-                Reply::Loaded { name, caps, readings } => {
-                    self.connected = true;
-                    self.name = name;
-                    self.values = readings.into_iter().map(|r| (r.feature.code, r.value)).collect();
-                    self.drafts.clear();
-                    match caps {
-                        Ok(c) => {
-                            self.caps = Some(c);
-                            self.message = Some(Message::Loaded(Instant::now()));
-                        }
-                        Err(e) => self.message = Some(Message::Error(e)),
-                    }
-                }
                 Reply::Read(readings) => {
+                    self.connected = true;
+                    if readings.len() == features::FEATURES.len() {
+                        self.message = Some(Message::Loaded(Instant::now()));
+                    }
                     for r in readings {
                         self.drafts.remove(&r.feature.code);
                         self.values.insert(r.feature.code, r.value);
                     }
+                }
+                Reply::Caps { name, caps } => {
+                    self.connected = true;
+                    self.name = name;
+                    self.caps = Some(caps);
                 }
                 Reply::Written { feature, result } => {
                     self.drafts.remove(&feature.code);
@@ -225,12 +230,11 @@ impl App {
                         }
                     }
                 }
-                Reply::Sdm(Ok((eb, caps))) => {
+                Reply::Sdm { eb, caps } => {
                     let model = caps.model.clone().unwrap_or_default();
                     self.message = Some(Message::Info(format!("EB = {eb:#04x} · {model}"), Instant::now()));
                     self.caps = Some(caps);
                 }
-                Reply::Sdm(Err(e)) => self.message = Some(Message::Error(e)),
                 Reply::PresetApplied { name, report } => {
                     self.message = Some(match report.failed.first() {
                         None => Message::Info(
@@ -244,9 +248,11 @@ impl App {
                     let names: Vec<&str> = features::FEATURES.iter().map(|f| f.name).collect();
                     self.reread(&names);
                 }
-                Reply::Failed(e) => {
-                    self.connected = false;
-                    self.message = Some(Message::Error(e));
+                Reply::Failed { message, lost } => {
+                    if lost {
+                        self.connected = false;
+                    }
+                    self.message = Some(Message::Error(message));
                 }
             }
         }
@@ -344,7 +350,7 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let refresh = egui::Button::new(format!("⟳ {}", self.t("refresh")));
                 if ui.add_enabled(!self.busy(), refresh).clicked() {
-                    self.request(Request::Load);
+                    self.load(false);
                 }
                 if self.busy() {
                     ui.spinner();

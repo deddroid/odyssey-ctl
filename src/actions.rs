@@ -54,10 +54,15 @@ pub struct Reading {
     pub value: Result<VcpValue, String>,
 }
 
-pub fn read(m: &mut dyn Vcp, features: &[&'static Feature]) -> Vec<Reading> {
+/// Reads `features`. A reply error (unsupported code, bad checksum after retries) is kept per
+/// feature; an I/O error means the monitor is gone, so the whole batch fails at once.
+pub fn read(m: &mut dyn Vcp, features: &[&'static Feature]) -> Result<Vec<Reading>, Error> {
     features
         .iter()
-        .map(|&feature| Reading { feature, value: m.get_vcp(feature.code).map_err(|e| e.to_string()) })
+        .map(|&feature| match m.get_vcp(feature.code) {
+            Err(e @ Error::Io(_)) => Err(e),
+            value => Ok(Reading { feature, value: value.map_err(|e| e.to_string()) }),
+        })
         .collect()
 }
 
@@ -70,6 +75,12 @@ pub struct Change {
 /// Writes `target` after checking the verification status and the monitor's maximum,
 /// then reads the value back. Fails when the monitor does not apply the write.
 pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) -> Result<Change, Error> {
+    check_policy(f, allow_unverified)?;
+    let before = m.get_vcp(f.code)?;
+    write_from(m, f, before, target)
+}
+
+fn check_policy(f: &Feature, allow_unverified: bool) -> Result<(), Error> {
     if f.read_only {
         return Err(Error::Other(format!("'{}' is read-only (its value format is not decoded yet)", f.name)));
     }
@@ -80,7 +91,11 @@ pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) 
             f.status.as_str()
         )));
     }
-    let before = m.get_vcp(f.code)?;
+    Ok(())
+}
+
+/// Like [`write`], for callers that have just read `before` themselves (saves one transaction).
+pub fn write_from(m: &mut dyn Vcp, f: &Feature, before: VcpValue, target: u16) -> Result<Change, Error> {
     if is_disabled(before.current, before.max) {
         return Err(Error::Other(format!(
             "'{}' is disabled in the monitor's current state (e.g. by Eye Saver, PIP or the picture mode)",
@@ -153,7 +168,7 @@ mod tests {
     #[test]
     fn read_returns_one_reading_per_feature() {
         let mut d = DemoDevice::new();
-        let r = read(&mut d, &[find("brightness").unwrap(), find("picture-mode").unwrap()]);
+        let r = read(&mut d, &[find("brightness").unwrap(), find("picture-mode").unwrap()]).unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].value.as_ref().unwrap().current, 50);
         assert_eq!(r[1].value.as_ref().unwrap().current, 8);

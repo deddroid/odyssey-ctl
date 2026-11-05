@@ -29,7 +29,8 @@ pub trait Vcp {
     fn capabilities(&mut self) -> Result<String, Error>;
 }
 
-/// Delays recommended by the DDC/CI standard, with some margin for this monitor.
+/// DDC/CI delays. The G60SD answers reliably with these (0 retries over ~200 transactions);
+/// the 50 ms the standard suggests are available through the environment variables below.
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
     /// Wait between sending a request and reading its reply.
@@ -44,10 +45,26 @@ pub struct Timing {
 impl Default for Timing {
     fn default() -> Self {
         Timing {
-            reply: Duration::from_millis(50),
-            gap: Duration::from_millis(50),
+            reply: Duration::from_millis(30),
+            gap: Duration::from_millis(20),
             retry: Duration::from_millis(100),
             attempts: 4,
+        }
+    }
+}
+
+impl Timing {
+    /// Defaults, overridden by `ODYSSEY_CTL_DDC_REPLY_MS` and `ODYSSEY_CTL_DDC_GAP_MS`
+    /// (for monitors that need more time, or for measuring how little this one needs).
+    pub fn from_env() -> Self {
+        let ms = |name: &str, default: Duration| {
+            std::env::var(name).ok().and_then(|v| v.parse().ok()).map_or(default, Duration::from_millis)
+        };
+        let base = Timing::default();
+        Timing {
+            reply: ms("ODYSSEY_CTL_DDC_REPLY_MS", base.reply),
+            gap: ms("ODYSSEY_CTL_DDC_GAP_MS", base.gap),
+            ..base
         }
     }
 }
@@ -61,7 +78,7 @@ pub struct DdcDevice<B: Bus> {
 
 impl<B: Bus> DdcDevice<B> {
     pub fn new(bus: B) -> Self {
-        DdcDevice { bus, timing: Timing::default(), debug: crate::debug_enabled(), last: None }
+        DdcDevice { bus, timing: Timing::from_env(), debug: crate::debug_enabled(), last: None }
     }
 
     pub fn with_timing(mut self, timing: Timing) -> Self {

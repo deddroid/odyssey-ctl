@@ -86,10 +86,14 @@ pub struct Report {
 }
 
 /// Applies `target`, reading each feature right before deciding whether to write it, because the
-/// picture mode and Eye Saver change other values.
+/// picture mode and Eye Saver change other values. Locked features are skipped.
 pub fn apply(m: &mut dyn Vcp, target: &Values, allow_unverified: bool) -> Report {
     let mut report = Report::default();
     for (f, t) in order(target) {
+        if !f.status.safe_to_write() && !allow_unverified {
+            report.skipped.push(f);
+            continue;
+        }
         let now = match m.get_vcp(f.code) {
             Ok(v) => v,
             Err(e) => {
@@ -100,7 +104,7 @@ pub fn apply(m: &mut dyn Vcp, target: &Values, allow_unverified: bool) -> Report
         if is_disabled(now.current, now.max) {
             report.skipped.push(f);
         } else if comparable(f, now.current) != t {
-            match actions::write(m, f, t, allow_unverified) {
+            match actions::write_from(m, f, now, t) {
                 Ok(_) => report.changed.push(f),
                 Err(e) => report.failed.push((f, e.to_string())),
             }
