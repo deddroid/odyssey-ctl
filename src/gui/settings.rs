@@ -12,11 +12,23 @@ use crate::i18n::Lang;
 pub struct Settings {
     pub language: Lang,
     pub allow_unverified: bool,
+    /// Closing the window keeps the program in the tray.
+    pub close_to_tray: bool,
+    /// Start with the window closed (tray only).
+    pub start_hidden: bool,
+    /// Launched at login (hidden); mirrors the autostart entry.
+    pub autostart: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { language: Lang::from_env(), allow_unverified: false }
+        Settings {
+            language: Lang::from_env(),
+            allow_unverified: false,
+            close_to_tray: true,
+            start_hidden: false,
+            autostart: false,
+        }
     }
 }
 
@@ -62,11 +74,11 @@ mod tests {
 
     #[test]
     fn round_trip_and_defaults() {
-        let s = Settings { language: Lang::It, allow_unverified: true };
+        let s = Settings { language: Lang::It, allow_unverified: true, start_hidden: true, ..Default::default() };
         let text = toml::to_string(&s).unwrap();
-        assert_eq!(text, "language = \"it\"\nallow_unverified = true\n");
+        assert!(text.contains("language = \"it\"") && text.contains("start_hidden = true"));
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), s);
         let partial: Settings = toml::from_str("language = \"en\"").unwrap();
-        assert!(!partial.allow_unverified);
+        assert!(!partial.allow_unverified && partial.close_to_tray && !partial.autostart);
     }
 }

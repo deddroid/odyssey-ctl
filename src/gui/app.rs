@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
+
+use crate::desktop::{self, Shell};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, ColorImage, Layout, RichText, Stroke, Vec2};
@@ -74,6 +76,7 @@ struct Screenshots {
 }
 
 pub struct App {
+    shell: Arc<Shell>,
     worker: Worker,
     settings: Settings,
     page: Page,
@@ -97,14 +100,23 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, bus: Option<u32>, screenshots: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        shell: Arc<Shell>,
+        bus: Option<u32>,
+        screenshots: Option<PathBuf>,
+    ) -> Self {
         theme::apply(&cc.egui_ctx);
+        if let Ok(mut ctx) = shell.ctx.lock() {
+            *ctx = Some(cc.egui_ctx.clone());
+        }
         let shots = screenshots.map(|dir| {
             let (tx, rx) = mpsc::channel();
             let steps = Lang::ALL.iter().flat_map(|&l| Page::ALL.map(|p| (l, p))).collect();
             Screenshots { dir, steps, index: 0, frames: 0, requested: false, tx, rx }
         });
         let mut app = App {
+            shell,
             worker: Worker::spawn(cc.egui_ctx.clone(), bus),
             settings: Settings::load(),
             page: Page::Picture,
@@ -477,6 +489,25 @@ impl App {
         self.values.iter().filter_map(|(&c, v)| Some((c, *v.as_ref().ok()?))).collect()
     }
 
+    fn apply_preset(&mut self, i: usize) {
+        let p = &self.presets.list[i];
+        let (name, values) = (p.name.clone(), p.values.clone());
+        let allow_unverified = self.settings.allow_unverified;
+        self.confirm_delete = None;
+        self.request(Request::ApplyPreset { name, values, allow_unverified });
+    }
+
+    /// Presets chosen from the tray menu while the window is open.
+    fn poll_tray(&mut self) {
+        if self.writing() {
+            return; // picked up on a later frame
+        }
+        let Some(name) = self.shell.preset_requests.lock().ok().and_then(|mut q| q.pop()) else { return };
+        if let Some(i) = self.presets.list.iter().position(|p| p.name == name) {
+            self.apply_preset(i);
+        }
+    }
+
     fn save_presets(&mut self) {
         if self.shots.is_none()
             && let Err(e) = self.presets.save()
@@ -562,11 +593,7 @@ impl App {
                 });
             }
             if let Some(i) = apply {
-                let p = &self.presets.list[i];
-                let (name, values) = (p.name.clone(), p.values.clone());
-                let allow_unverified = self.settings.allow_unverified;
-                self.confirm_delete = None;
-                self.request(Request::ApplyPreset { name, values, allow_unverified });
+                self.apply_preset(i);
             }
             if let Some(i) = overwrite {
                 let allow = self.settings.allow_unverified;
@@ -770,6 +797,32 @@ impl App {
                 self.save_settings();
             }
         });
+        let (title, hint) = (self.t("card.desktop"), self.t("card.desktop.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            let mut changed = false;
+            theme::row(ui, &self.t("row.close_to_tray"), |ui| {
+                changed |= theme::toggle(ui, &mut self.settings.close_to_tray).changed();
+            });
+            theme::row(ui, &self.t("row.start_hidden"), |ui| {
+                changed |= theme::toggle(ui, &mut self.settings.start_hidden).changed();
+            });
+            let mut autostart_error = None;
+            theme::row(ui, &self.t("row.autostart"), |ui| {
+                if theme::toggle(ui, &mut self.settings.autostart).changed() {
+                    changed = true;
+                    if let Err(e) = desktop::set_autostart(self.settings.autostart) {
+                        self.settings.autostart = !self.settings.autostart;
+                        autostart_error = Some(e.to_string());
+                    }
+                }
+            });
+            if let Some(e) = autostart_error {
+                self.message = Some(Message::Error(e));
+            }
+            if changed {
+                self.save_settings();
+            }
+        });
         let (title, hint) = (self.t("card.about"), self.t("card.about.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
             theme::row(ui, &self.t("row.version"), |ui| {
@@ -782,6 +835,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_worker();
+        self.poll_tray();
         let ctx = ui.ctx().clone();
         self.screenshot_step(&ctx);
         egui::Panel::left("nav")
@@ -801,5 +855,14 @@ impl eframe::App for App {
                 Page::Settings => self.page_settings(ui),
             });
         });
+    }
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        // The window is gone: tray commands go to the main loop again.
+        if let Ok(mut ctx) = self.shell.ctx.lock() {
+            *ctx = None;
+        }
     }
 }

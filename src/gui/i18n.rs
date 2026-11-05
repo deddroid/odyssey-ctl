@@ -36,6 +36,13 @@ impl Lang {
 /// (key, English, Italian)
 const STRINGS: &[(&str, &str, &str)] = &[
     ("nav.presets", "Presets", "Preset"),
+    ("tray.show", "Show window", "Mostra finestra"),
+    ("tray.quit", "Quit", "Esci"),
+    ("card.desktop", "Tray and startup", "Tray e avvio"),
+    ("card.desktop.hint", "From the tray icon you can apply presets without opening the window. Tray changes take effect at the next start.", "Dall'icona nel tray puoi applicare i preset senza aprire la finestra. Le modifiche al tray valgono dal prossimo avvio."),
+    ("row.close_to_tray", "Keep in the tray when closed", "Resta nel tray alla chiusura"),
+    ("row.start_hidden", "Start minimised in the tray", "Avvia ridotto nel tray"),
+    ("row.autostart", "Start at login", "Avvia all'accesso"),
     ("card.save_preset", "Save the current state", "Salva lo stato attuale"),
     ("card.save_preset.hint", "Stores picture, game and lighting settings as they are now. Input and OSD language are not included.", "Memorizza le impostazioni di immagine, gioco e luci come sono adesso. Ingresso e lingua dell'OSD non sono inclusi."),
     ("preset_name", "Preset name, e.g. Night", "Nome del preset, es. Notte"),
