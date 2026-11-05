@@ -228,6 +228,21 @@ pub const FEATURES: &[Feature] = &[
     feature("pc-av-mode", 0xE4, "PC/AV mode", Status::Unverified, PC_AV),
 ];
 
+/// Features whose value or availability changes when `name` is written, so they must be read again.
+/// Picture mode resets the per-mode values; Eye Saver locks picture settings (verified on the G60SD);
+/// lighting and effect decide whether a colour applies (verified).
+pub fn dependents(name: &str) -> &'static [&'static str] {
+    const PICTURE: &[&str] = &[
+        "picture-mode", "brightness", "contrast", "sharpness", "color-tone", "red-gain", "green-gain", "blue-gain",
+        "black-equalizer", "eye-saver",
+    ];
+    match name {
+        "picture-mode" | "eye-saver" | "pc-av-mode" => PICTURE,
+        "lighting" | "lighting-effect" => &["lighting", "lighting-effect", "lighting-color"],
+        _ => &[],
+    }
+}
+
 pub fn find(name: &str) -> Option<&'static Feature> {
     FEATURES.iter().find(|f| f.name.eq_ignore_ascii_case(name))
 }
@@ -269,6 +284,17 @@ mod tests {
         assert_eq!(find("language").unwrap().value_name(5), Some("italian"));
         assert!(find("pip-source").unwrap().read_only);
         assert!(is_disabled(0xFD, 0x2F) && !is_disabled(0xFD, 0xFF) && !is_disabled(6, 10));
+    }
+
+    #[test]
+    fn dependents_are_known_features() {
+        for f in FEATURES {
+            for d in dependents(f.name) {
+                assert!(find(d).is_some(), "{} -> {d}", f.name);
+            }
+        }
+        assert!(dependents("eye-saver").contains(&"brightness"));
+        assert!(dependents("brightness").is_empty());
     }
 
     #[test]

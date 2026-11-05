@@ -2,6 +2,7 @@
 
 mod app;
 mod i18n;
+mod presets;
 mod settings;
 mod theme;
 mod worker;

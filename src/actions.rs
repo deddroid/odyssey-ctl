@@ -91,7 +91,7 @@ pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) 
         return Err(Error::Other(format!("{target} is above the maximum {} of {}", before.max, f.name)));
     }
     m.set_vcp(f.code, target)?;
-    let after = read_back(m, f.code)?;
+    let after = read_back_after(m, f.code, settle_time(f))?;
     if after != target {
         return Err(Error::Other(format!(
             "{}: wrote {target} but the monitor reports {after} (write ignored?)",
@@ -101,10 +101,19 @@ pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) 
     Ok(Change { before: before.current, after })
 }
 
-/// Reads a value shortly after a write; the monitor needs a moment to apply it
-/// (Samsung Display Manager waits 400 ms after a picture mode change).
+/// How long the monitor needs to apply a write before it reads back the new value. Samsung Display
+/// Manager waits 400 ms after a picture mode change; 200 ms was enough for every other write tested.
+fn settle_time(f: &Feature) -> Duration {
+    Duration::from_millis(if f.name == "picture-mode" { 400 } else { 200 })
+}
+
+/// Reads a value shortly after a write; the monitor needs a moment to apply it.
 pub fn read_back(m: &mut dyn Vcp, code: u8) -> Result<u16, Error> {
-    sleep(Duration::from_millis(400));
+    read_back_after(m, code, Duration::from_millis(200))
+}
+
+fn read_back_after(m: &mut dyn Vcp, code: u8, wait: Duration) -> Result<u16, Error> {
+    sleep(wait);
     Ok(m.get_vcp(code)?.current)
 }
 

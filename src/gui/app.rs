@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -7,14 +7,17 @@ use eframe::egui::{self, Align, Color32, ColorImage, Layout, RichText, Stroke, V
 use odyssey_ctl::caps::{Capabilities, Profile};
 use odyssey_ctl::ddc::VcpValue;
 use odyssey_ctl::features::{self, Feature, SyncState};
+use odyssey_ctl::presets as preset_logic;
 
 use crate::i18n::{Lang, tr};
+use crate::presets::{Preset, Presets};
 use crate::settings::Settings;
 use crate::theme::{self, ACCENT, ERR, OK, TEXT_DIM, WARN, dim};
 use crate::worker::{Reply, Request, Worker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
+    Presets,
     Picture,
     Game,
     Lighting,
@@ -24,10 +27,12 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 6] = [Page::Picture, Page::Game, Page::Lighting, Page::Source, Page::Monitor, Page::Settings];
+    const ALL: [Page; 7] =
+        [Page::Presets, Page::Picture, Page::Game, Page::Lighting, Page::Source, Page::Monitor, Page::Settings];
 
     fn slug(self) -> &'static str {
         match self {
+            Page::Presets => "presets",
             Page::Picture => "picture",
             Page::Game => "game",
             Page::Lighting => "lighting",
@@ -39,6 +44,7 @@ impl Page {
 
     fn icon(self) -> &'static str {
         match self {
+            Page::Presets => "★",
             Page::Picture => "◐",
             Page::Game => "◎",
             Page::Lighting => "✦",
@@ -76,11 +82,18 @@ pub struct App {
     values: BTreeMap<u8, Result<VcpValue, String>>,
     /// Slider values being dragged, sent to the monitor on release.
     drafts: BTreeMap<u8, u16>,
-    pending: usize,
+    /// Requests sent to the worker, oldest first: true for those that write to the monitor.
+    /// The worker answers in order.
+    in_flight: VecDeque<bool>,
     connected: bool,
     message: Option<Message>,
     demo: bool,
     shots: Option<Screenshots>,
+    presets: Presets,
+    /// Name typed for a new preset.
+    new_name: String,
+    /// Preset waiting for the second click on "Delete".
+    confirm_delete: Option<usize>,
 }
 
 impl App {
@@ -99,11 +112,14 @@ impl App {
             caps: None,
             values: BTreeMap::new(),
             drafts: BTreeMap::new(),
-            pending: 0,
+            in_flight: VecDeque::new(),
             connected: false,
             message: None,
             demo: std::env::var("ODYSSEY_CTL_DEMO").is_ok_and(|v| v == "1"),
             shots,
+            presets: Presets::load(),
+            new_name: String::new(),
+            confirm_delete: None,
         };
         app.request(Request::Load);
         app
@@ -130,8 +146,27 @@ impl App {
     }
 
     fn request(&mut self, r: Request) {
-        self.pending += 1;
+        let writes = matches!(r, Request::Write { .. } | Request::Sdm(_) | Request::ApplyPreset { .. });
+        self.in_flight.push_back(writes);
         self.worker.send(r);
+    }
+
+    /// Any request in progress (shown with a spinner, controls stay usable for reads).
+    fn busy(&self) -> bool {
+        !self.in_flight.is_empty()
+    }
+
+    /// A write in progress: controls are locked so writes never overlap.
+    fn writing(&self) -> bool {
+        self.in_flight.contains(&true)
+    }
+
+    /// Re-reads `names` in the background.
+    fn reread(&mut self, names: &[&str]) {
+        let list: Vec<_> = names.iter().filter_map(|n| features::find(n)).collect();
+        if !list.is_empty() {
+            self.request(Request::Read(list));
+        }
     }
 
     fn save_settings(&mut self) {
@@ -144,7 +179,7 @@ impl App {
 
     fn poll_worker(&mut self) {
         while let Some(reply) = self.worker.try_recv() {
-            self.pending = self.pending.saturating_sub(1);
+            self.in_flight.pop_front();
             match reply {
                 Reply::Loaded { name, caps, readings } => {
                     self.connected = true;
@@ -157,6 +192,12 @@ impl App {
                             self.message = Some(Message::Loaded(Instant::now()));
                         }
                         Err(e) => self.message = Some(Message::Error(e)),
+                    }
+                }
+                Reply::Read(readings) => {
+                    for r in readings {
+                        self.drafts.remove(&r.feature.code);
+                        self.values.insert(r.feature.code, r.value);
                     }
                 }
                 Reply::Written { feature, result } => {
@@ -173,16 +214,14 @@ impl App {
                                 self.value_text(feature, c.after)
                             );
                             self.message = Some(Message::Info(text, Instant::now()));
-                            // These change other settings or lock/unlock them: re-read everything.
-                            const AFFECTS_OTHERS: [&str; 5] =
-                                ["picture-mode", "eye-saver", "lighting", "lighting-effect", "pc-av-mode"];
-                            if AFFECTS_OTHERS.contains(&feature.name) {
-                                self.request(Request::Load);
-                            }
+                            // Settings that change or lock others: re-read just those.
+                            self.reread(features::dependents(feature.name));
                         }
                         Err(e) => {
                             self.message = Some(Message::Error(e));
-                            self.request(Request::Load); // show what the monitor really has
+                            // Show what the monitor really has.
+                            self.reread(&[feature.name]);
+                            self.reread(features::dependents(feature.name));
                         }
                     }
                 }
@@ -192,6 +231,19 @@ impl App {
                     self.caps = Some(caps);
                 }
                 Reply::Sdm(Err(e)) => self.message = Some(Message::Error(e)),
+                Reply::PresetApplied { name, report } => {
+                    self.message = Some(match report.failed.first() {
+                        None => Message::Info(
+                            self.t("preset_applied")
+                                .replace("{name}", &name)
+                                .replace("{n}", &report.changed.len().to_string()),
+                            Instant::now(),
+                        ),
+                        Some((f, e)) => Message::Error(format!("{}: {e}", self.feature_label(f))),
+                    });
+                    let names: Vec<&str> = features::FEATURES.iter().map(|f| f.name).collect();
+                    self.reread(&names);
+                }
                 Reply::Failed(e) => {
                     self.connected = false;
                     self.message = Some(Message::Error(e));
@@ -203,7 +255,7 @@ impl App {
     fn screenshot_step(&mut self, ctx: &egui::Context) {
         let Some(s) = self.shots.as_mut() else { return };
         ctx.request_repaint();
-        if self.pending > 0 {
+        if !self.in_flight.is_empty() {
             return; // wait for the monitor data
         }
         if let Ok(image) = s.rx.try_recv() {
@@ -269,7 +321,7 @@ impl App {
                     ui.label(dim(format!("{} {model}", self.t("row.profile"))));
                 });
             }
-            let (color, text) = if self.pending > 0 {
+            let (color, text) = if self.busy() && self.values.is_empty() {
                 (WARN, self.t("busy"))
             } else if self.demo {
                 (ACCENT, self.t("demo_mode"))
@@ -291,10 +343,10 @@ impl App {
             ui.heading(self.t(&format!("nav.{}", self.page.slug())));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let refresh = egui::Button::new(format!("⟳ {}", self.t("refresh")));
-                if ui.add_enabled(self.pending == 0, refresh).clicked() {
+                if ui.add_enabled(!self.busy(), refresh).clicked() {
                     self.request(Request::Load);
                 }
-                if self.pending > 0 {
+                if self.busy() {
                     ui.spinner();
                 }
             });
@@ -332,7 +384,7 @@ impl App {
     fn control(&mut self, ui: &mut egui::Ui, name: &str) {
         let f = features::find(name).expect("pages use known features");
         let allowed = f.status.safe_to_write() || self.settings.allow_unverified;
-        let enabled = allowed && self.pending == 0;
+        let enabled = allowed && !self.writing();
         let mut write = None;
         match self.values.get(&f.code).cloned() {
             None => {
@@ -414,6 +466,121 @@ impl App {
     }
 
     // ---- pages -------------------------------------------------------------
+
+    fn current_values(&self) -> BTreeMap<u8, VcpValue> {
+        self.values.iter().filter_map(|(&c, v)| Some((c, *v.as_ref().ok()?))).collect()
+    }
+
+    fn save_presets(&mut self) {
+        if self.shots.is_none()
+            && let Err(e) = self.presets.save()
+        {
+            self.message = Some(Message::Error(e.to_string()));
+        }
+    }
+
+    /// One line describing a preset: its picture mode, if any, and how many settings it holds.
+    fn preset_summary(&self, p: &Preset) -> String {
+        let count = self.t("n_settings").replace("{n}", &p.values.len().to_string());
+        let mode = features::find("picture-mode")
+            .zip(p.values.get("picture-mode"))
+            .map(|(f, &v)| self.value_text(f, v));
+        match mode {
+            Some(m) => format!("{m} · {count}"),
+            None => count,
+        }
+    }
+
+    fn page_presets(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.save_preset"), self.t("card.save_preset.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            ui.horizontal(|ui| {
+                let hint = self.t("preset_name");
+                ui.add(egui::TextEdit::singleline(&mut self.new_name).hint_text(hint).desired_width(260.0));
+                let name = self.new_name.trim().to_string();
+                let can = !name.is_empty() && !self.values.is_empty() && !self.writing();
+                let save = egui::Button::new(RichText::new(self.t("save")).color(Color32::WHITE)).fill(ACCENT);
+                if ui.add_enabled(can, save).clicked() {
+                    let allow = self.settings.allow_unverified;
+                    let values =
+                        preset_logic::capture(&self.current_values(), |f| f.status.safe_to_write() || allow);
+                    self.presets.put(Preset { name: name.clone(), values });
+                    self.save_presets();
+                    self.new_name.clear();
+                    let text = self.t("preset_saved").replace("{name}", &name);
+                    self.message = Some(Message::Info(text, Instant::now()));
+                }
+            });
+        });
+
+        let (title, hint) = (self.t("card.presets"), self.t("card.presets.hint"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            if self.presets.list.is_empty() {
+                ui.label(dim(self.t("presets_empty")));
+                return;
+            }
+            let current = self.current_values();
+            let mut apply = None;
+            let mut overwrite = None;
+            let mut delete = None;
+            for (i, p) in self.presets.list.iter().enumerate() {
+                if i > 0 {
+                    ui.separator();
+                }
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&p.name).strong().color(Color32::WHITE));
+                            if preset_logic::matches(&p.values, &current) {
+                                ui.label(RichText::new(format!("● {}", self.t("active"))).small().color(OK));
+                            }
+                        });
+                        ui.label(dim(self.preset_summary(p)));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let confirming = self.confirm_delete == Some(i);
+                        let label = if confirming { self.t("confirm_delete") } else { self.t("delete") };
+                        let text = RichText::new(label).color(if confirming { ERR } else { TEXT_DIM });
+                        if ui.button(text).clicked() {
+                            delete = Some(i);
+                        }
+                        if ui.add_enabled(!self.writing(), egui::Button::new(self.t("overwrite"))).clicked() {
+                            overwrite = Some(i);
+                        }
+                        let apply_button =
+                            egui::Button::new(RichText::new(self.t("apply")).color(Color32::WHITE)).fill(ACCENT);
+                        if ui.add_enabled(!self.writing() && !self.values.is_empty(), apply_button).clicked() {
+                            apply = Some(i);
+                        }
+                    });
+                });
+            }
+            if let Some(i) = apply {
+                let p = &self.presets.list[i];
+                let (name, values) = (p.name.clone(), p.values.clone());
+                let allow_unverified = self.settings.allow_unverified;
+                self.confirm_delete = None;
+                self.request(Request::ApplyPreset { name, values, allow_unverified });
+            }
+            if let Some(i) = overwrite {
+                let allow = self.settings.allow_unverified;
+                self.presets.list[i].values = preset_logic::capture(&current, |f| f.status.safe_to_write() || allow);
+                self.confirm_delete = None;
+                self.save_presets();
+                let text = self.t("preset_saved").replace("{name}", &self.presets.list[i].name);
+                self.message = Some(Message::Info(text, Instant::now()));
+            }
+            if let Some(i) = delete {
+                if self.confirm_delete == Some(i) {
+                    self.presets.list.remove(i);
+                    self.confirm_delete = None;
+                    self.save_presets();
+                } else {
+                    self.confirm_delete = Some(i);
+                }
+            }
+        });
+    }
 
     fn page_picture(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.mode"), self.t("card.mode.hint"));
@@ -566,10 +733,10 @@ impl App {
         let (title, hint) = (self.t("card.sdm"), self.t("card.sdm.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
             ui.horizontal(|ui| {
-                if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_on"))).clicked() {
+                if ui.add_enabled(!self.writing(), egui::Button::new(self.t("sdm_on"))).clicked() {
                     self.request(Request::Sdm(true));
                 }
-                if ui.add_enabled(self.pending == 0, egui::Button::new(self.t("sdm_off"))).clicked() {
+                if ui.add_enabled(!self.writing(), egui::Button::new(self.t("sdm_off"))).clicked() {
                     self.request(Request::Sdm(false));
                 }
             });
@@ -619,6 +786,7 @@ impl eframe::App for App {
         egui::CentralPanel::default_margins().show(ui, |ui| {
             self.top_bar(ui);
             egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| match self.page {
+                Page::Presets => self.page_presets(ui),
                 Page::Picture => self.page_picture(ui),
                 Page::Game => self.page_game(ui),
                 Page::Lighting => self.page_lighting(ui),

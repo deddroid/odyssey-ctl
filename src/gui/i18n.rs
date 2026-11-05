@@ -35,6 +35,22 @@ impl Lang {
 
 /// (key, English, Italian)
 const STRINGS: &[(&str, &str, &str)] = &[
+    ("nav.presets", "Presets", "Preset"),
+    ("card.save_preset", "Save the current state", "Salva lo stato attuale"),
+    ("card.save_preset.hint", "Stores picture, game and lighting settings as they are now. Input and OSD language are not included.", "Memorizza le impostazioni di immagine, gioco e luci come sono adesso. Ingresso e lingua dell'OSD non sono inclusi."),
+    ("preset_name", "Preset name, e.g. Night", "Nome del preset, es. Notte"),
+    ("save", "Save", "Salva"),
+    ("card.presets", "Your presets", "I tuoi preset"),
+    ("card.presets.hint", "Applying a preset changes only the settings that differ from the monitor.", "Applicando un preset cambiano solo le impostazioni diverse da quelle del monitor."),
+    ("presets_empty", "No presets yet. Set the monitor the way you like it and save it above.", "Nessun preset. Regola il monitor come preferisci e salvalo qui sopra."),
+    ("apply", "Apply", "Applica"),
+    ("overwrite", "Overwrite", "Sovrascrivi"),
+    ("delete", "Delete", "Elimina"),
+    ("confirm_delete", "Confirm delete", "Conferma eliminazione"),
+    ("active", "active", "attivo"),
+    ("n_settings", "{n} settings", "{n} impostazioni"),
+    ("preset_saved", "Preset “{name}” saved.", "Preset “{name}” salvato."),
+    ("preset_applied", "Preset “{name}” applied: {n} changes.", "Preset “{name}” applicato: {n} modifiche."),
     ("nav.picture", "Picture", "Immagine"),
     ("nav.game", "Game", "Gioco"),
     ("nav.lighting", "Lighting", "Luci"),

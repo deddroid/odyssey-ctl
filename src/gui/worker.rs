@@ -8,18 +8,24 @@ use eframe::egui;
 use odyssey_ctl::actions::{self, Change, Monitor, Reading};
 use odyssey_ctl::caps::Capabilities;
 use odyssey_ctl::features::{FEATURES, Feature};
+use odyssey_ctl::presets;
 
 pub enum Request {
     /// Read the capability string and every known feature.
     Load,
+    /// Read only these features (after a write that changes them).
+    Read(Vec<&'static Feature>),
     Write { feature: &'static Feature, value: u16, allow_unverified: bool },
     Sdm(bool),
+    ApplyPreset { name: String, values: presets::Values, allow_unverified: bool },
 }
 
 pub enum Reply {
     Loaded { name: Option<String>, caps: Result<Capabilities, String>, readings: Vec<Reading> },
+    Read(Vec<Reading>),
     Written { feature: &'static Feature, result: Result<Change, String> },
     Sdm(Result<(u16, Capabilities), String>),
+    PresetApplied { name: String, report: presets::Report },
     Failed(String),
 }
 
@@ -83,10 +89,14 @@ fn handle(m: &mut Monitor, request: Request, name: &Option<String>) -> Reply {
             }
             Reply::Loaded { name: name.clone(), caps, readings }
         }
+        Request::Read(list) => Reply::Read(actions::read(m.as_mut(), &list)),
         Request::Write { feature, value, allow_unverified } => Reply::Written {
             feature,
             result: actions::write(m.as_mut(), feature, value, allow_unverified).map_err(|e| e.to_string()),
         },
         Request::Sdm(on) => Reply::Sdm(actions::set_sdm(m.as_mut(), on).map_err(|e| e.to_string())),
+        Request::ApplyPreset { name, values, allow_unverified } => {
+            Reply::PresetApplied { name, report: presets::apply(m.as_mut(), &values, allow_unverified) }
+        }
     }
 }

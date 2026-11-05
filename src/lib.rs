@@ -10,6 +10,7 @@ pub mod demo;
 pub mod device;
 pub mod edid;
 pub mod features;
+pub mod presets;
 #[cfg(target_os = "linux")]
 pub mod linux;
 

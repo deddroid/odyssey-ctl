@@ -87,12 +87,14 @@ fn is_display_adapter(sys: &Path) -> bool {
     fs::read_to_string(parent.join("class")).is_ok_and(|c| c.trim().starts_with("0x03"))
 }
 
-/// Reads the EDID base block, retrying because these reads occasionally fail or return garbage.
+/// Reads the EDID base block. Retries only when something answers with bad data: a bus with no
+/// monitor fails at the first write and is skipped at once.
 fn read_edid(bus: u32) -> Option<Vec<u8>> {
     let mut b = I2cBus::open(bus, EDID_ADDR).ok()?;
     for attempt in 1..=3 {
+        b.write(&[0]).ok()?;
         let mut buf = vec![0u8; 128];
-        if b.write(&[0]).is_ok() && b.read(&mut buf).is_ok() && Edid::parse(&buf).is_some() {
+        if b.read(&mut buf).is_ok() && Edid::parse(&buf).is_some() {
             return Some(buf);
         }
         sleep(Duration::from_millis(50 * attempt));
