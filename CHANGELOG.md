@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-06
+
 ### Added
 - DDC/CI library with packet encoding, capability parsing, EDID and a feature table that records
   what is verified on hardware.
@@ -19,3 +21,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Verified on hardware
 - Samsung Odyssey OLED G6 G60SD (LS27DG602SUXEN), firmware 1003.0 and 1006.0, HDMI, Linux.
+
+[Unreleased]: https://github.com/deddroid/odyssey-ctl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/deddroid/odyssey-ctl/releases/tag/v0.1.0
