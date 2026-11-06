@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-06
+
 ### Added
 - Virtual Aim Point placement: `aim status`, `aim move`, `aim position` (and `--center`). In the
   GUI: a screen outline to click on, arrows, coordinates, a centre button and saved positions
@@ -43,5 +45,6 @@ All notable changes to this project are documented here. The format follows
 ### Verified on hardware
 - Samsung Odyssey OLED G6 G60SD (LS27DG602SUXEN), firmware 1003.0 and 1006.0, HDMI, Linux.
 
-[Unreleased]: https://github.com/deddroid/odyssey-ctl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/deddroid/odyssey-ctl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/deddroid/odyssey-ctl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deddroid/odyssey-ctl/releases/tag/v0.1.0
