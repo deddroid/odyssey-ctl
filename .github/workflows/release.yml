@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: windows-latest
+            target: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --release
+      - name: Build
+        shell: bash
+        # No build machine paths in the binaries.
+        run: |
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
+          cargo build --release --locked
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          name=odyssey-ctl-${GITHUB_REF_NAME#v}-${{ matrix.target }}
+          mkdir -p "$name/icons"
+          cp target/release/odyssey-ctl target/release/odyssey-ctl-gui "$name/"
+          cp LICENSE README.md README.it.md CHANGELOG.md install.sh "$name/"
+          cp packaging/linux/70-odyssey-ctl.rules packaging/linux/odyssey-ctl.conf packaging/linux/odyssey-ctl.desktop "$name/"
+          cp assets/icon.svg assets/icon-*.png "$name/icons/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "odyssey-ctl-$($env:GITHUB_REF_NAME.TrimStart('v'))-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item target/release/odyssey-ctl.exe, target/release/odyssey-ctl-gui.exe, LICENSE, README.md, README.it.md, CHANGELOG.md $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            odyssey-ctl-*.tar.gz*
+            odyssey-ctl-*.zip*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            odyssey-ctl-*.tar.gz
+            odyssey-ctl-*.tar.gz.sha256
+            odyssey-ctl-*.zip
+            odyssey-ctl-*.zip.sha256
+          generate_release_notes: true
