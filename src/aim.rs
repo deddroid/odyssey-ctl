@@ -16,6 +16,40 @@ pub const VCP_POSITION: u8 = 0xEF;
 /// Largest coordinate the 13-bit fields carry.
 pub const MAX_COORD: u16 = 0x1FFF;
 
+/// Units one `EE` step moves the crosshair (verified on the G60SD).
+pub const STEP_UNITS: u16 = 2;
+
+/// Minimum time between two `EE` steps: closer writes are partly dropped and hide the
+/// crosshair (verified on the G60SD).
+pub const STEP_PACING_MS: u64 = 500;
+
+impl Move {
+    /// Where `steps` steps from `p` land, kept inside `border`.
+    pub fn apply(self, p: Position, steps: u16, border: Border) -> Position {
+        let d = steps.saturating_mul(STEP_UNITS);
+        let (min_x, max_x) = (border.x, border.x + border.width.saturating_sub(1));
+        let (min_y, max_y) = (border.y, border.y + border.height.saturating_sub(1));
+        match self {
+            Move::Up => Position {
+                x: p.x,
+                y: p.y.saturating_sub(d).max(min_y),
+            },
+            Move::Down => Position {
+                x: p.x,
+                y: p.y.saturating_add(d).min(max_y),
+            },
+            Move::Left => Position {
+                x: p.x.saturating_sub(d).max(min_x),
+                y: p.y,
+            },
+            Move::Right => Position {
+                x: p.x.saturating_add(d).min(max_x),
+                y: p.y,
+            },
+        }
+    }
+}
+
 /// One step of the crosshair (write to `EE`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Move {
@@ -178,6 +212,21 @@ mod tests {
         );
         assert_eq!(Move::parse("LEFT"), Some(Move::Left));
         assert_eq!(Move::Left as u16, 2);
+    }
+
+    #[test]
+    fn steps_become_positions_inside_the_border() {
+        let b = Border {
+            x: 35,
+            y: 36,
+            width: 1629,
+            height: 407,
+        };
+        let p = Position { x: 852, y: 239 };
+        assert_eq!(Move::Right.apply(p, 10, b), Position { x: 872, y: 239 });
+        assert_eq!(Move::Up.apply(p, 50, b), Position { x: 852, y: 139 });
+        assert_eq!(Move::Up.apply(p, 500, b).y, 36);
+        assert_eq!(Move::Right.apply(p, 5000, b).x, 35 + 1629 - 1);
     }
 
     #[test]

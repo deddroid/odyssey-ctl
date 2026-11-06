@@ -188,9 +188,10 @@ pub fn aim_move(
     check_aim_on(m)?;
     for i in 0..steps.max(1) {
         if i > 0 {
-            // Steps sent back to back get dropped by the firmware (10 steps moved 6-8 units
-            // instead of 20); SDM sends one per key press.
-            sleep(Duration::from_millis(80));
+            // Verified on the G60SD: steps closer than ~100 ms are partly dropped and hide the
+            // crosshair until the next isolated write; 500 ms apart every step lands and the
+            // crosshair stays. For many steps prefer `aim_position`.
+            sleep(Duration::from_millis(aim::STEP_PACING_MS));
         }
         aim::step(m, dir)?;
     }

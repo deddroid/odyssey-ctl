@@ -1053,8 +1053,15 @@ impl App {
             self.save_presets();
         }
         if let Some(dir) = moved {
-            let steps = self.aim_steps;
-            self.act(Action::AimMove(dir, steps));
+            // Steps must be 500 ms apart or the crosshair hides, so arrows write the resulting
+            // position instead (immediate, and read back).
+            match self.aim_border {
+                Some(b) => target = Some(dir.apply(pos, self.aim_steps, b)),
+                None => {
+                    let steps = self.aim_steps;
+                    self.act(Action::AimMove(dir, steps));
+                }
+            }
         }
         if let Some(p) = target {
             self.act(Action::AimPosition(p));

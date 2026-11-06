@@ -60,7 +60,7 @@ enum Command {
 enum Aim {
     /// Where the crosshair is and the area it can be placed in.
     Status,
-    /// Move the crosshair one step (or `--steps` steps).
+    /// Move the crosshair one step (or `--steps` steps, 500 ms apart: faster steps hide it).
     Move {
         #[arg(value_parser = ["up", "down", "left", "right"])]
         direction: String,
