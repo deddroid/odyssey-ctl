@@ -2,7 +2,14 @@
 name = "odyssey-ctl"
 version = "0.1.0"
 edition = "2024"
-description = "Control Samsung Odyssey monitors over DDC/CI"
+rust-version = "1.88"
+description = "Control Samsung Odyssey monitors over DDC/CI: picture, game and lighting settings, presets, CLI and GUI"
+license = "MIT"
+authors = ["deddroid <deddo9412@gmail.com>"]
+repository = "https://github.com/deddroid/odyssey-ctl"
+readme = "README.md"
+keywords = ["monitor", "samsung", "odyssey", "ddc", "mccs"]
+categories = ["command-line-utilities", "hardware-support"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }

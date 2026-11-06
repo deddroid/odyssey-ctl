@@ -1,0 +1,4 @@
+# Let the logged-in user talk DDC/CI to monitors without root: the I2C buses that
+# belong to a graphics card (PCI class 0x03) get an ACL for the active seat.
+# Installed by odyssey-ctl. Requires the i2c-dev kernel module.
+SUBSYSTEM=="i2c-dev", KERNEL=="i2c-[0-9]*", ATTRS{class}=="0x03*", TAG+="uaccess"

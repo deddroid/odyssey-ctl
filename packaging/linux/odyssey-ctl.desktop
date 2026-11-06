@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Odyssey Control
+GenericName=Monitor settings
+GenericName[it]=Impostazioni del monitor
+Comment=Picture, game and lighting settings of Samsung Odyssey monitors over DDC/CI, with presets
+Comment[it]=Impostazioni di immagine, gioco e luci dei monitor Samsung Odyssey via DDC/CI, con preset
+Exec=odyssey-ctl-gui
+Icon=odyssey-ctl
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=monitor;samsung;odyssey;ddc;brightness;
+Keywords[it]=monitor;samsung;odyssey;ddc;luminosità;
+StartupWMClass=odyssey-ctl
