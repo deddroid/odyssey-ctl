@@ -6,7 +6,7 @@ use odyssey_ctl::actions::{self, open};
 use odyssey_ctl::caps::Capabilities;
 use odyssey_ctl::device::{Error, Vcp};
 use odyssey_ctl::features::{self, FEATURES, Feature, parse_number};
-use odyssey_ctl::{SDM_DISABLE, SDM_ENABLE};
+use odyssey_ctl::{SDM_DISABLE, SDM_ENABLE, aim, pip};
 
 #[derive(Parser)]
 #[command(version, about = "Control Samsung Odyssey monitors over DDC/CI")]
@@ -14,6 +14,9 @@ struct Cli {
     /// I2C bus number (/dev/i2c-N); detected automatically when omitted.
     #[arg(long, global = true)]
     bus: Option<u32>,
+    /// Allow writes that have not been verified on hardware (see `features`).
+    #[arg(long, global = true)]
+    unverified: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -27,15 +30,22 @@ enum Command {
     /// Read features (all known features when none is given).
     Get { features: Vec<String> },
     /// Write a feature. The value is a number or one of the names shown by `features`.
-    Set {
-        feature: String,
-        value: String,
-        /// Allow writing features that have not been verified on hardware.
-        #[arg(long)]
-        unverified: bool,
-    },
-    /// List known features and their verification status.
+    Set { feature: String, value: String },
+    /// List known features and actions with their verification status.
     Features,
+    /// Virtual Aim Point placement (choose an icon with `set aim-point` first).
+    #[command(subcommand)]
+    Aim(Aim),
+    /// Picture-in-Picture / Picture-by-Picture.
+    #[command(subcommand)]
+    Pip(Pip),
+    /// CoreSync: the lighting follows the screen content.
+    Coresync {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Reset the white balance (red, green, blue gains) of the current picture mode.
+    ResetWhiteBalance,
     /// Switch Samsung's extended (SDM) profile on or off via VCP EB.
     Sdm {
         #[arg(value_parser = ["on", "off"])]
@@ -44,6 +54,55 @@ enum Command {
     /// Low-level access by VCP code.
     #[command(subcommand)]
     Raw(Raw),
+}
+
+#[derive(Subcommand)]
+enum Aim {
+    /// Where the crosshair is and the area it can be placed in.
+    Status,
+    /// Move the crosshair one step (or `--steps` steps).
+    Move {
+        #[arg(value_parser = ["up", "down", "left", "right"])]
+        direction: String,
+        #[arg(long, default_value_t = 1)]
+        steps: u16,
+    },
+    /// Put the crosshair at X, Y (inside the border shown by `status`), or at the centre.
+    Position {
+        x: Option<u16>,
+        y: Option<u16>,
+        #[arg(long, conflicts_with_all = ["x", "y"])]
+        center: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum Pip {
+    /// Decoded PIP/PBP status and sources.
+    Status,
+    On,
+    Off,
+    /// Window layout: pip, or a PBP layout (pbp11, pbp21, pbp12) on monitors that support PBP.
+    Mode {
+        #[arg(value_parser = ["pip", "pbp11", "pbp21", "pbp12"])]
+        mode: String,
+    },
+    /// PIP window size, 1 (small) to 3 (large).
+    Size {
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=3))]
+        size: u8,
+    },
+    /// PIP window corner: 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right.
+    Position {
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=4))]
+        corner: u8,
+    },
+    /// Input of a window: `main` or `sub`, then hdmi1, hdmi2, dp1, ...
+    Source {
+        #[arg(value_parser = ["main", "sub"])]
+        window: String,
+        input: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -71,6 +130,7 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Error> {
+    let allow = cli.unverified;
     match cli.command {
         Command::List => list(),
         Command::Features => {
@@ -79,14 +139,118 @@ fn run(cli: Cli) -> Result<(), Error> {
         }
         Command::Info => info(&mut *open(cli.bus)?.monitor),
         Command::Get { features } => get(&mut *open(cli.bus)?.monitor, &features),
-        Command::Set {
-            feature,
-            value,
-            unverified,
-        } => set(&mut *open(cli.bus)?.monitor, &feature, &value, unverified),
+        Command::Set { feature, value } => {
+            set(&mut *open(cli.bus)?.monitor, &feature, &value, allow)
+        }
+        Command::Aim(cmd) => aim_cmd(&mut *open(cli.bus)?.monitor, cmd, allow),
+        Command::Pip(cmd) => pip_cmd(&mut *open(cli.bus)?.monitor, cmd, allow),
+        Command::Coresync { state } => {
+            let after = actions::set_coresync(&mut *open(cli.bus)?.monitor, state == "on", allow)?;
+            println!(
+                "coresync: {} (lighting {})",
+                on_off(after & 2 != 0),
+                on_off(after & 1 != 0)
+            );
+            Ok(())
+        }
+        Command::ResetWhiteBalance => {
+            let [r, g, b] = actions::reset_white_balance(&mut *open(cli.bus)?.monitor, allow)?;
+            println!("white balance reset: red {r}, green {g}, blue {b}");
+            Ok(())
+        }
         Command::Sdm { state } => sdm(&mut *open(cli.bus)?.monitor, state == "on"),
         Command::Raw(raw) => raw_cmd(&mut *open(cli.bus)?.monitor, raw),
     }
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+fn aim_cmd(m: &mut dyn Vcp, cmd: Aim, allow: bool) -> Result<(), Error> {
+    let p = match cmd {
+        Aim::Status => {
+            let (p, b) = actions::aim_state(m)?;
+            println!(
+                "border:   x {} y {} width {} height {}",
+                b.x, b.y, b.width, b.height
+            );
+            p
+        }
+        Aim::Move { direction, steps } => {
+            let dir = aim::Move::parse(&direction).expect("validated by clap");
+            actions::aim_move(m, dir, steps, allow)?
+        }
+        Aim::Position { x, y, center } => {
+            let target = match (x, y, center) {
+                (Some(x), Some(y), _) => aim::Position { x, y },
+                (None, None, true) => aim::read_border(m)?.center(),
+                (None, None, false) => {
+                    println!("position: {}", describe_position(aim::read_position(m)?));
+                    return Ok(());
+                }
+                _ => return Err(Error::Other("give both X and Y, or --center".into())),
+            };
+            actions::aim_position(m, target, allow)?
+        }
+    };
+    println!("position: {}", describe_position(p));
+    Ok(())
+}
+
+fn describe_position(p: aim::Position) -> String {
+    format!("x {} y {}", p.x, p.y)
+}
+
+fn pip_cmd(m: &mut dyn Vcp, cmd: Pip, allow: bool) -> Result<(), Error> {
+    let status = match cmd {
+        Pip::Status => pip::decode_status(m.get_vcp(pip::VCP_COMMAND)?.current),
+        Pip::On => actions::pip_command(m, pip::Command::On, allow)?,
+        Pip::Off => actions::pip_command(m, pip::Command::Off, allow)?,
+        Pip::Mode { mode } => {
+            let cmd = match mode.as_str() {
+                "pip" => pip::Command::PipMode,
+                "pbp11" => pip::Command::PbpLayout(0),
+                "pbp21" => pip::Command::PbpLayout(1),
+                _ => pip::Command::PbpLayout(2),
+            };
+            if cmd != pip::Command::PipMode {
+                actions::pip_command(m, pip::Command::PbpMode, allow)?;
+            }
+            actions::pip_command(m, cmd, allow)?
+        }
+        Pip::Size { size } => actions::pip_command(m, pip::Command::PipSize(size - 1), allow)?,
+        Pip::Position { corner } => {
+            actions::pip_command(m, pip::Command::PipPosition(corner - 1), allow)?
+        }
+        Pip::Source { window, input } => {
+            let channel = pip::Channel::parse(&window).expect("validated by clap");
+            let src = pip::Source::parse(&input).ok_or_else(|| {
+                let names: Vec<&str> = pip::SOURCES.iter().map(|(n, _)| *n).collect();
+                Error::Other(format!(
+                    "unknown input '{input}' (one of: {})",
+                    names.join(", ")
+                ))
+            })?;
+            let (main, sub) = actions::pip_source(m, channel, src, allow)?;
+            println!("sources: main {} · sub {}", main.label(), sub.label());
+            return Ok(());
+        }
+    };
+    println!(
+        "pip: {}  mode {:?}  size {}/{}  corner {}  supports {}{}",
+        on_off(status.on),
+        status.mode,
+        status.pip_size + 1,
+        status.pip_sizes,
+        ["top-left", "top-right", "bottom-left", "bottom-right"][usize::from(status.pip_position)],
+        if status.pip_supported { "PIP " } else { "" },
+        if status.pbp_supported { "PBP" } else { "" },
+    );
+    if let Some((main, sub)) = pip::decode_sources(m.get_vcp(pip::VCP_SOURCE)?.current) {
+        println!("sources: main {} · sub {}", main.label(), sub.label());
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -129,6 +293,11 @@ fn print_features() {
             println!("{:<37}values: {}", "", names.join(", "));
         }
     }
+    println!();
+    println!("{:<22} {:<14} ACTION", "NAME", "STATUS");
+    for (name, status, label) in features::ACTIONS {
+        println!("{name:<22} {:<14} {label}", status.as_str());
+    }
 }
 
 fn info(m: &mut dyn Vcp) -> Result<(), Error> {
@@ -147,10 +316,11 @@ fn feature(name: &str) -> Result<&'static Feature, Error> {
         .ok_or_else(|| Error::Other(format!("unknown feature '{name}' (see `features`)")))
 }
 
-fn describe(f: &Feature, current: u16) -> String {
-    if current == features::DISABLED && f.value_name(current).is_none() {
-        return format!("{current} (disabled now)");
+fn describe(f: &Feature, raw: u16) -> String {
+    if features::disabled(f, raw, 0) && f.value_name(raw).is_none() {
+        return format!("{raw} (disabled now)");
     }
+    let current = features::state(f, raw);
     match f.value_name(current) {
         Some(n) => format!("{current} ({n})"),
         None => current.to_string(),

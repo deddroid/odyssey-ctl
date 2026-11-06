@@ -78,8 +78,8 @@ Value meanings come from SDM's Swift enums and the decoders in both programs.
 | Contrast | `12` | 0–50 | standard MCCS |
 | Sharpness | `87` | 0–20 | standard MCCS |
 | White balance R / G / B | `16` / `18` / `1A` | 0–100 | standard MCCS |
-| White balance reset | `E0` | write `0` (LEMON only). In the SEC profile `E0` shares the colour-tone handler: never write it there | from SDM |
-| Picture mode | `2D` | PC mode (`E4`=0): 0 Entertain, 1 Graphic, 2 Eco, 3 Game Standard, 4 RPG, 5 RTS, 6 FPS, 7 Sports, 8 Original, 9 Custom. AV mode: 0 Dynamic, 1 Standard, 2 Eco, 3 Movie, 4 Game Standard, 5 RPG, 6 RTS, 7 FPS, 8 Sports, 9 Original, 10 Custom (max 10 = AV list) | verified (read): 8 = Original |
+| White balance reset | `E0` | write `0` (LEMON only). In the SEC profile `E0` shares the colour-tone handler: never write it there | **no effect on the G60SD**: `E0` reports max 0 even in LEMON24v1, the write is accepted and ignored (gains unchanged) |
+| Picture mode | `2D` | PC mode (`E4`=0): 0 Entertain, 1 Graphic, 2 Eco, 3 Game Standard, 4 RPG, 5 RTS, 6 FPS, 7 Sports, 8 Original, 9 Custom. AV mode: 0 Dynamic, 1 Standard, 2 Eco, 3 Movie, 4 Game Standard, 5 RPG, 6 RTS, 7 FPS, 8 Sports, 9 Original, 10 Custom (max 10 = AV list) | verified (read and write: Original ↔ Game Standard; the per-mode values follow) |
 | PC/AV mode | `E4` | 0 PC, 1 AV | from SDM |
 | Black Equalizer | `2F` | 0–10, `FD` when disabled | verified (write) |
 | Color tone | `14` | 0 Cool, 1 Standard, 2 Warm 1, 3 Warm 2, 4 Natural | verified (write 1 = Standard on OSD) |
@@ -87,16 +87,16 @@ Value meanings come from SDM's Swift enums and the decoders in both programs.
 | Adaptive Picture | `E1` | 0 off, 1 on, `FD` deactivated (PC mode only) | from SDM (max 0 in SEC) |
 | Input source | `60` | `0F` DP, `11` HDMI 1, `12` HDMI 2 | standard MCCS |
 | Language | `CC` | MCCS codes: 02 English, 03 French, 04 German, 05 Italian, 0A Spanish, … | standard MCCS (5 = Italian) |
-| Adaptive-Sync / FreeSync | `F2` | write 0 off / 1 on. Read: low nibble 0 off, 1 on, `D` deactivated; high nibble 1 = FreeSync type | from SDM (`0x10` = FreeSync, off) |
+| Adaptive-Sync / FreeSync | `F2` | write 0 off / 1 on. Read: low nibble 0 off, 1 on, `D` deactivated; high nibble 1 = FreeSync type | verified (write 0/1; the OSD calls it Adaptive-Sync on HDMI). **The monitor leaves the bus for about a second after the write** (video re-sync): read back after 1 s and retry once |
 | Response time | `F3` | 0 Standard, 1 Faster, 2 Extreme, 3 Extreme MBR | from SDM (not on this OLED) |
 | Virtual Aim Point icon | `ED` | SDM enum: 0 Off, 1–3 type A red/blue/white, 4–6 type B red/blue/white, 7 reset position; SDM swaps 1↔2 and 4↔5 for LEMON23v3. **On the G60SD (LEMON24v1) the swap applies too: 1 = A blue, 2 = A red, 4 = B blue** | verified (1, 2, 4 on screen) |
-| Virtual Aim Point move / border | `EE` | write 0 up, 1 down, 2 left, 3 right. Read (stateful, 4 GETs): bits 15–13 component (x, y, width, height), bits 12–0 value | from SDM |
-| Virtual Aim Point position | `EF` | write `X & 1FFF`, then `2000 \| (Y & 1FFF)`, 100 ms apart. Read (stateful) toggles X/Y | from SDM |
-| Infinity Core Lighting / CoreSync | `F8` | write 0/1 = lighting off/on. Read: bit 0 lighting, bit 1 CoreSync, bit 2 sync name. CoreSync write differs between Windows (`10`/`11`) and macOS (`02`/`03`) | verified for 0/1 (effect and colour read `FD` while off); CoreSync not tested |
+| Virtual Aim Point move / border | `EE` | write 0 up, 1 down, 2 left, 3 right (one step = 2 units). Read (stateful, 4 GETs): bits 15–13 component (x, y, width, height), bits 12–0 value | verified. G60SD border: x 35, y 36, 1629 × 407 (firmware units, not pixels) |
+| Virtual Aim Point position | `EF` | write `X & 1FFF`, then `2000 \| (Y & 1FFF)`, 100 ms apart. Read (stateful) toggles X/Y | verified: default position 852 × 239 = centre of the border; a written position reads back exactly |
+| Infinity Core Lighting / CoreSync | `F8` | write 0/1 = lighting off/on. Read: bit 0 lighting, bit 1 CoreSync, bit 2 sync name. CoreSync write differs between Windows (`10`/`11`) and macOS (`02`/`03`) | verified for 0/1 (effect and colour read `FD` while off). **CoreSync verified: only the Windows form works, and only with the Static effect (`F9`=3) selected first**; written alone (`11` or `03`) nothing changes. While CoreSync is on, effect and colour read `FD` |
 | Lighting effect | `F9` | 0 Aurora, 1 Aurora rotation, 2 Comet, 3 Static, 4 Rainbow, 5 Breathing | verified (0, 3) |
 | Lighting colour | `FA` | index into 48 colours, `FD` when the effect has no colour | verified writes (6 = light blue; 7, "blue" for SDM, looked whitish: names not trusted) |
-| PIP/PBP command / status | `E2` | write one command: 0 off, 1 on, 2 PBP mode, 3–9 PBP layouts, 10 PIP mode, 11–13 PIP size, 14–17 PIP position. Read: bit field (bit 0 on, bits 3–1 mode, 5–4 size, 7–6 position, 9–8 / 11–10 supported sizes, 12 PIP supported, 13 PBP supported) | from SDM (`150E`: off, PIP only) |
-| PIP/PBP sources | `E3` | write `channel << 8 \| source` with source `type << 4 \| n` (HDMI 0x, DP 1x, USB-C 2x). Read: high byte main, low byte sub | from SDM |
+| PIP/PBP command / status | `E2` | write one command: 0 off, 1 on, 2 PBP mode, 3–9 PBP layouts, 10 PIP mode, 11–13 PIP size, 14–17 PIP position. Read: bit field (bit 0 on, bits 3–1 mode, 5–4 size, 7–6 position, 9–8 / 11–10 supported sizes, 12 PIP supported, 13 PBP supported) | verified: on/off, size, position. Switching on re-syncs the video (bus away for ~1 s); the monitor picks the other HDMI as sub input by itself. While on, `ED` reads `FD` |
+| PIP/PBP sources | `E3` | write `channel << 8 \| source` with source `type << 4 \| n` (HDMI 0x, DP 1x, USB-C 2x). Read: high byte main, low byte sub | verified (sub → DP 1); the new source reads back after more than 1 s |
 | PIP/PBP sound | `E8` | 0 main, 1 sub 1, 2 sub 2 | from SDM |
 | KVM USB source | `F1` | bit mask per input | from SDM (not on G60SD) |
 | Reset all | `04` | write `F1` | from SDM; never sent by odyssey-ctl |

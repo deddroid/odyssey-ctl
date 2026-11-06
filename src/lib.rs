@@ -4,6 +4,7 @@
 //! `device` adds timing and retries over any [`device::Bus`]; `linux` provides the i2c-dev bus.
 
 pub mod actions;
+pub mod aim;
 pub mod caps;
 pub mod ddc;
 pub mod demo;
@@ -12,6 +13,7 @@ pub mod edid;
 pub mod features;
 #[cfg(target_os = "linux")]
 pub mod linux;
+pub mod pip;
 pub mod presets;
 
 /// VCP code of Samsung's SDM control register (see docs/PROTOCOL.md).

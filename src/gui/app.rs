@@ -6,16 +6,19 @@ use crate::desktop::{self, Shell};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, ColorImage, Layout, RichText, Stroke, Vec2};
+use odyssey_ctl::actions::DisplayInfo;
+use odyssey_ctl::aim::{Border, Move, Position};
 use odyssey_ctl::caps::{Capabilities, Profile};
 use odyssey_ctl::ddc::VcpValue;
-use odyssey_ctl::features::{self, Feature, SyncState};
+use odyssey_ctl::features::{self, Feature};
+use odyssey_ctl::pip::{self, Channel, Source};
 use odyssey_ctl::presets as preset_logic;
 
 use crate::i18n::{Lang, tr};
 use crate::presets::{Preset, Presets};
 use crate::settings::Settings;
 use crate::theme::{self, ACCENT, ERR, OK, TEXT_DIM, WARN, dim};
-use crate::worker::{Reply, Request, Worker};
+use crate::worker::{Action, Reply, Request, Worker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -104,6 +107,14 @@ pub struct App {
     new_name: String,
     /// Preset waiting for the second click on "Delete".
     confirm_delete: Option<usize>,
+    /// Bus the worker opens (None = the first Samsung monitor).
+    bus: Option<u32>,
+    aim_position: Option<Position>,
+    aim_border: Option<Border>,
+    /// Coordinates being typed for the aim point.
+    aim_target: Option<Position>,
+    aim_steps: u16,
+    displays: Option<Vec<DisplayInfo>>,
 }
 
 impl App {
@@ -150,9 +161,54 @@ impl App {
             presets: Presets::load(),
             new_name: String::new(),
             confirm_delete: None,
+            bus,
+            aim_position: None,
+            aim_border: None,
+            aim_target: None,
+            aim_steps: 10,
+            displays: None,
         };
         app.load(true);
         app
+    }
+
+    /// An operation from `features::ACTIONS` may be sent.
+    fn action_allowed(&self, name: &str) -> bool {
+        features::action_status(name).is_some_and(|s| s.safe_to_write())
+            || self.settings.allow_unverified
+    }
+
+    fn act(&mut self, action: Action) {
+        let allow_unverified = self.settings.allow_unverified;
+        self.request(Request::Act {
+            action,
+            allow_unverified,
+        });
+    }
+
+    /// "to verify" marker shown next to a locked control.
+    fn lock_label(&self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new(format!("⚠ {}", self.t("locked")))
+                .small()
+                .color(WARN),
+        )
+        .on_hover_text(self.t("locked_hint"));
+    }
+
+    /// Talks to another monitor: a new worker, and everything read so far is forgotten.
+    fn switch_monitor(&mut self, ctx: &egui::Context, bus: u32) {
+        self.bus = Some(bus);
+        self.worker = Worker::spawn(ctx.clone(), Some(bus));
+        self.in_flight.clear();
+        self.values.clear();
+        self.drafts.clear();
+        self.caps = None;
+        self.name = None;
+        self.aim_position = None;
+        self.aim_border = None;
+        self.connected = false;
+        self.load(true);
     }
 
     fn t(&self, key: &str) -> String {
@@ -176,11 +232,7 @@ impl App {
     }
 
     fn request(&mut self, r: Request) {
-        let writes = matches!(
-            r,
-            Request::Write { .. } | Request::Sdm(_) | Request::ApplyPreset { .. }
-        );
-        self.in_flight.push_back(writes);
+        self.in_flight.push_back(r.writes());
         self.worker.send(r);
     }
 
@@ -254,6 +306,10 @@ impl App {
                             self.message = Some(Message::Info(text, Instant::now()));
                             // Settings that change or lock others: re-read just those.
                             self.reread(features::dependents(feature.name));
+                            if feature.name == "aim-point" {
+                                // A new icon may reset the position: read it again when shown.
+                                self.aim_position = None;
+                            }
                         }
                         Err(e) => {
                             self.message = Some(Message::Error(e));
@@ -284,6 +340,59 @@ impl App {
                     let names: Vec<&str> = features::FEATURES.iter().map(|f| f.name).collect();
                     self.reread(&names);
                 }
+                Reply::Aim { position, border } => {
+                    if self.aim_position != Some(position) && self.aim_position.is_some() {
+                        let text = self
+                            .t("aim.at")
+                            .replace("{x}", &position.x.to_string())
+                            .replace("{y}", &position.y.to_string());
+                        self.message = Some(Message::Info(text, Instant::now()));
+                    }
+                    self.aim_position = Some(position);
+                    self.aim_target = None;
+                    if border.is_some() {
+                        self.aim_border = border;
+                    }
+                }
+                Reply::Pip(status) => {
+                    let state = self.t(if status.on { "sync.on" } else { "sync.off" });
+                    self.message = Some(Message::Info(
+                        self.t("pip.done").replace("{state}", &state),
+                        Instant::now(),
+                    ));
+                    // PIP locks game and picture settings: read them again with the PIP state.
+                    self.reread(&[
+                        "pip",
+                        "pip-source",
+                        "pip-sound",
+                        "adaptive-sync",
+                        "black-equalizer",
+                        "aim-point",
+                        "picture-mode",
+                        "contrast",
+                        "sharpness",
+                    ]);
+                }
+                Reply::PipSources(main, sub) => {
+                    self.message = Some(Message::Info(
+                        format!(
+                            "{} {} · {} {}",
+                            self.t("row.main"),
+                            main.label(),
+                            self.t("row.sub"),
+                            sub.label()
+                        ),
+                        Instant::now(),
+                    ));
+                    self.reread(&["pip-source"]);
+                }
+                Reply::CoreSync(raw) => {
+                    if let Some(Ok(v)) = self.values.get_mut(&0xF8) {
+                        v.current = raw;
+                    }
+                    self.reread(&["lighting-effect", "lighting-color"]);
+                }
+                Reply::Displays(list) => self.displays = Some(list),
                 Reply::Failed { message, lost } => {
                     if lost {
                         self.connected = false;
@@ -466,7 +575,7 @@ impl App {
             Some(Err(_)) => {
                 ui.label(dim(self.t("not_supported")));
             }
-            Some(Ok(v)) if features::is_disabled(v.current, v.max) => {
+            Some(Ok(v)) if features::disabled(f, v.current, v.max) => {
                 ui.label(dim(self.t("disabled_now")));
             }
             Some(Ok(v)) => {
@@ -474,12 +583,7 @@ impl App {
             }
         }
         if !allowed {
-            ui.label(
-                RichText::new(format!("⚠ {}", self.t("locked")))
-                    .small()
-                    .color(WARN),
-            )
-            .on_hover_text(self.t("locked_hint"));
+            self.lock_label(ui);
         }
         if let Some(value) = write {
             let allow_unverified = self.settings.allow_unverified;
@@ -501,7 +605,7 @@ impl App {
             .collect();
         let is_switch = values.len() == 2 && values[0].1 == "off" && values[1].1 == "on";
         if is_switch {
-            let mut on = v.current & 1 == 1;
+            let mut on = features::state(f, v.current) == 1;
             return theme::toggle(ui, &mut on)
                 .changed()
                 .then_some(u16::from(on));
@@ -761,26 +865,29 @@ impl App {
             theme::row(ui, &label, |ui| self.control(ui, "black-equalizer"));
         });
         let (title, hint) = (self.t("card.aim"), self.t("card.aim.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| self.control(ui, "aim-point"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            self.control(ui, "aim-point");
+            let shown = self
+                .reading("aim-point")
+                .is_some_and(|v| v.current != 0 && !features::is_disabled(v.current, v.max));
+            if shown {
+                ui.add_space(10.0);
+                self.aim_pad(ui);
+            }
+        });
         let (title, hint) = (self.t("card.sync"), self.t("card.sync.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
             match self.reading("adaptive-sync") {
                 Some(v) => {
-                    let sync = features::decode_adaptive_sync(v.current);
-                    let state = match sync.state {
-                        SyncState::Off => self.t("sync.off"),
-                        SyncState::On => self.t("sync.on"),
-                        SyncState::Disabled => self.t("disabled_now"),
-                    };
-                    let kind = if sync.freesync {
+                    let kind = if features::decode_adaptive_sync(v.current).freesync {
                         "FreeSync Premium Pro"
                     } else {
                         "Adaptive-Sync"
                     };
-                    theme::row(ui, &self.t("row.state"), |ui| {
-                        ui.label(state);
-                    });
-                    theme::row(ui, &self.t("row.type"), |ui| {
+                    let label = self.t("row.state");
+                    theme::row(ui, &label, |ui| self.control(ui, "adaptive-sync"));
+                    let label = self.t("row.type");
+                    theme::row(ui, &label, |ui| {
                         ui.label(kind);
                     });
                 }
@@ -789,6 +896,105 @@ impl App {
                 }
             }
         });
+    }
+
+    /// Arrows, coordinates and a centre button for the crosshair. Its position and border are
+    /// read when first shown (stateful registers, so never with the other features).
+    fn aim_pad(&mut self, ui: &mut egui::Ui) {
+        if self.aim_position.is_none() && !self.busy() {
+            self.request(Request::AimState);
+        }
+        let allowed = self.action_allowed("aim-move") && self.action_allowed("aim-position");
+        let enabled = allowed && !self.writing();
+        let label = self.t("aim.position");
+        let Some(pos) = self.aim_position else {
+            theme::row(ui, &label, |ui| {
+                ui.label(dim(self.t("no_data")));
+            });
+            return;
+        };
+        let mut moved = None;
+        let mut target = None;
+        theme::row(ui, &label, |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space(34.0);
+                        if ui.button(" ▲ ").clicked() {
+                            moved = Some(Move::Up);
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button(" ◀ ").clicked() {
+                            moved = Some(Move::Left);
+                        }
+                        ui.add_space(8.0);
+                        if ui.button(" ▶ ").clicked() {
+                            moved = Some(Move::Right);
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add_space(34.0);
+                        if ui.button(" ▼ ").clicked() {
+                            moved = Some(Move::Down);
+                        }
+                    });
+                });
+                ui.add_space(16.0);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(dim(self.t("aim.steps")));
+                        for n in [1u16, 10, 50] {
+                            if theme::chip(ui, self.aim_steps == n, &n.to_string()) {
+                                self.aim_steps = n;
+                            }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let mut t = self.aim_target.unwrap_or(pos);
+                        ui.label(dim("X"));
+                        ui.add(
+                            egui::DragValue::new(&mut t.x).range(0..=odyssey_ctl::aim::MAX_COORD),
+                        );
+                        ui.label(dim("Y"));
+                        ui.add(
+                            egui::DragValue::new(&mut t.y).range(0..=odyssey_ctl::aim::MAX_COORD),
+                        );
+                        self.aim_target = (t != pos).then_some(t);
+                        if ui
+                            .add_enabled(t != pos, egui::Button::new(self.t("aim.apply")))
+                            .clicked()
+                        {
+                            target = Some(t);
+                        }
+                        if let Some(b) = self.aim_border
+                            && ui.button(self.t("aim.center")).clicked()
+                        {
+                            target = Some(b.center());
+                        }
+                    });
+                    if let Some(b) = self.aim_border {
+                        let text = self
+                            .t("aim.area")
+                            .replace("{x}", &b.x.to_string())
+                            .replace("{y}", &b.y.to_string())
+                            .replace("{w}", &b.width.to_string())
+                            .replace("{h}", &b.height.to_string());
+                        ui.label(dim(text));
+                    }
+                });
+            });
+        });
+        if !allowed {
+            self.lock_label(ui);
+        }
+        if let Some(dir) = moved {
+            let steps = self.aim_steps;
+            self.act(Action::AimMove(dir, steps));
+        }
+        if let Some(p) = target {
+            self.act(Action::AimPosition(p));
+        }
     }
 
     fn page_lighting(&mut self, ui: &mut egui::Ui) {
@@ -803,7 +1009,143 @@ impl App {
                 theme::row(ui, &label, |ui| self.control(ui, name));
             }
             ui.label(dim(self.t("row.colour.hint")));
+            ui.add_space(6.0);
+            let (label, hint) = (self.t("row.coresync"), self.t("coresync.hint"));
+            let lighting = self.reading("lighting");
+            let allowed = self.action_allowed("coresync");
+            let mut change = None;
+            theme::row(ui, &label, |ui| match lighting {
+                Some(v) if v.current & 1 == 1 => {
+                    let mut on = v.current & 2 != 0;
+                    ui.add_enabled_ui(allowed && !self.writing(), |ui| {
+                        if theme::toggle(ui, &mut on).changed() {
+                            change = Some(on);
+                        }
+                    });
+                    if !allowed {
+                        self.lock_label(ui);
+                    }
+                }
+                Some(_) => {
+                    ui.label(dim(self.t("disabled_now")));
+                }
+                None => {
+                    ui.label(dim(self.t("no_data")));
+                }
+            });
+            ui.label(dim(hint));
+            if let Some(on) = change {
+                self.act(Action::CoreSync(on));
+            }
         });
+    }
+
+    /// PIP switch, window size and corner, the input of each window and the sound source.
+    fn pip_controls(&mut self, ui: &mut egui::Ui, status: pip::Status) {
+        let allowed = self.action_allowed("pip");
+        let enabled = allowed && !self.writing();
+        let mut cmd = None;
+        let mut source = None;
+        let label = self.t("row.state");
+        theme::row(ui, &label, |ui| {
+            let mut on = status.on;
+            ui.add_enabled_ui(enabled && status.pip_supported, |ui| {
+                if theme::toggle(ui, &mut on).changed() {
+                    cmd = Some(if on {
+                        pip::Command::On
+                    } else {
+                        pip::Command::Off
+                    });
+                }
+            });
+            if !allowed {
+                self.lock_label(ui);
+            }
+        });
+        if !status.pip_supported {
+            let label = self.t("row.supported");
+            theme::row(ui, &label, |ui| {
+                ui.label(dim(self.t("not_supported")));
+            });
+        } else if status.on {
+            let label = self.t("pip.size");
+            theme::row(ui, &label, |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    for n in 0..status.pip_sizes {
+                        if theme::chip(ui, status.pip_size == n, &(n + 1).to_string())
+                            && status.pip_size != n
+                        {
+                            cmd = Some(pip::Command::PipSize(n));
+                        }
+                    }
+                });
+            });
+            let label = self.t("pip.corner");
+            theme::row(ui, &label, |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for n in 0..4u8 {
+                            let text = self.t(&format!("pip.corner.{n}"));
+                            if theme::chip(ui, status.pip_position == n, &text)
+                                && status.pip_position != n
+                            {
+                                cmd = Some(pip::Command::PipPosition(n));
+                            }
+                        }
+                    });
+                });
+            });
+            // The monitor's own inputs, named as the PIP source register names them.
+            let inputs: Vec<(Source, String)> = features::find("input")
+                .map(|f| {
+                    f.values
+                        .iter()
+                        .filter_map(|&(code, name)| {
+                            Some((Source::from_input_code(code)?, self.t(&format!("v.{name}"))))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let current = self
+                .reading("pip-source")
+                .and_then(|v| pip::decode_sources(v.current));
+            let allowed_src = self.action_allowed("pip-source");
+            let windows = [
+                ("pip.main", Channel::Main, current.map(|c| c.0)),
+                ("pip.sub", Channel::Sub, current.map(|c| c.1)),
+            ];
+            for (key, channel, pick) in windows {
+                let label = self.t(key);
+                theme::row(ui, &label, |ui| {
+                    ui.add_enabled_ui(allowed_src && !self.writing(), |ui| {
+                        let selected = pick.map(|s| s.label()).unwrap_or_else(|| "—".into());
+                        egui::ComboBox::from_id_salt(key)
+                            .width(160.0)
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                for (src, name) in &inputs {
+                                    if ui.selectable_label(pick == Some(*src), name).clicked()
+                                        && pick != Some(*src)
+                                    {
+                                        source = Some((channel, *src));
+                                    }
+                                }
+                            });
+                    });
+                    if !allowed_src {
+                        self.lock_label(ui);
+                    }
+                });
+            }
+            let label = self.t("row.pip_sound");
+            theme::row(ui, &label, |ui| self.control(ui, "pip-sound"));
+        }
+        if let Some(c) = cmd {
+            self.act(Action::Pip(c));
+        }
+        if let Some((channel, src)) = source {
+            self.act(Action::PipSource(channel, src));
+        }
     }
 
     fn page_source(&mut self, ui: &mut egui::Ui) {
@@ -819,39 +1161,7 @@ impl App {
         });
         let (title, hint) = (self.t("card.pip"), self.t("card.pip.hint"));
         theme::card(ui, &title, Some(&hint), |ui| match self.reading("pip") {
-            Some(v) => {
-                let pip = features::decode_pip_status(v.current);
-                let state = self.t(if pip.on { "sync.on" } else { "sync.off" });
-                let supported = match (pip.pip_supported, pip.pbp_supported) {
-                    (true, true) => "PIP · PBP",
-                    (true, false) => "PIP",
-                    (false, true) => "PBP",
-                    (false, false) => "—",
-                };
-                theme::row(ui, &self.t("row.state"), |ui| {
-                    ui.label(state);
-                });
-                theme::row(ui, &self.t("row.supported"), |ui| {
-                    ui.label(supported);
-                });
-                if pip.on
-                    && let Some(src) = self.reading("pip-source")
-                {
-                    let [main, sub] = src.current.to_be_bytes();
-                    let text = format!(
-                        "{} {} · {} {}",
-                        self.t("row.main"),
-                        features::source_name(main).unwrap_or_default(),
-                        self.t("row.sub"),
-                        features::source_name(sub).unwrap_or_default()
-                    );
-                    theme::row(ui, &self.t("row.sources"), |ui| {
-                        ui.label(text);
-                    });
-                }
-                let label = self.t("row.pip_sound");
-                theme::row(ui, &label, |ui| self.control(ui, "pip-sound"));
-            }
+            Some(v) => self.pip_controls(ui, pip::decode_status(v.current)),
             None => {
                 ui.label(dim(self.t("not_supported")));
             }
@@ -895,6 +1205,59 @@ impl App {
                 });
             }
         });
+        if self.displays.is_none() && !self.busy() {
+            self.request(Request::Discover);
+        }
+        let (title, hint) = (self.t("card.monitors"), self.t("card.monitors.hint"));
+        let ctx = ui.ctx().clone();
+        let mut pick = None;
+        let mut rescan = false;
+        theme::card(ui, &title, Some(&hint), |ui| {
+            match self.displays.as_deref() {
+                None => {
+                    ui.label(dim(self.t("no_data")));
+                }
+                Some([]) => {
+                    ui.label(dim(self.t("no_monitors")));
+                }
+                Some(list) => {
+                    // Without --bus the worker opens the first Samsung monitor.
+                    let current = self
+                        .bus
+                        .or_else(|| list.iter().find(|d| d.samsung).map(|d| d.bus));
+                    for d in list {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&d.name).color(Color32::WHITE));
+                            ui.label(dim(format!("/dev/i2c-{}", d.bus)));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if current == Some(d.bus) {
+                                    ui.label(RichText::new(self.t("current")).small().color(OK));
+                                } else if ui
+                                    .add_enabled(
+                                        !self.busy(),
+                                        egui::Button::new(self.t("use_monitor")),
+                                    )
+                                    .clicked()
+                                {
+                                    pick = Some(d.bus);
+                                }
+                            });
+                        });
+                    }
+                }
+            }
+            ui.add_space(4.0);
+            rescan = ui
+                .add_enabled(!self.busy(), egui::Button::new(self.t("rescan")))
+                .clicked();
+        });
+        if let Some(bus) = pick {
+            self.switch_monitor(&ctx, bus);
+        }
+        if rescan {
+            self.displays = None;
+            self.request(Request::Discover);
+        }
         let (title, hint) = (self.t("card.sdm"), self.t("card.sdm.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
             ui.horizontal(|ui| {

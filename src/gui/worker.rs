@@ -6,11 +6,22 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use eframe::egui;
-use odyssey_ctl::actions::{self, Change, Monitor, Reading};
+use odyssey_ctl::actions::{self, Change, DisplayInfo, Monitor, Reading};
+use odyssey_ctl::aim::{Border, Move, Position};
 use odyssey_ctl::caps::Capabilities;
 use odyssey_ctl::device::Error;
 use odyssey_ctl::features::Feature;
+use odyssey_ctl::pip::{self, Channel, Source};
 use odyssey_ctl::presets;
+
+/// Operations that are not a single feature value (gated like unverified features).
+pub enum Action {
+    AimMove(Move, u16),
+    AimPosition(Position),
+    Pip(pip::Command),
+    PipSource(Channel, Source),
+    CoreSync(bool),
+}
 
 pub enum Request {
     Read(Vec<&'static Feature>),
@@ -26,6 +37,27 @@ pub enum Request {
         values: presets::Values,
         allow_unverified: bool,
     },
+    /// Position and border of the aim point (stateful reads, done in full cycles).
+    AimState,
+    Act {
+        action: Action,
+        allow_unverified: bool,
+    },
+    /// Monitors on this machine (no connection needed).
+    Discover,
+}
+
+impl Request {
+    /// True for requests that change the monitor: the UI locks its controls meanwhile.
+    pub fn writes(&self) -> bool {
+        matches!(
+            self,
+            Request::Write { .. }
+                | Request::Sdm(_)
+                | Request::ApplyPreset { .. }
+                | Request::Act { .. }
+        )
+    }
 }
 
 pub enum Reply {
@@ -47,6 +79,15 @@ pub enum Reply {
         name: String,
         report: presets::Report,
     },
+    Aim {
+        position: Position,
+        border: Option<Border>,
+    },
+    Pip(pip::Status),
+    PipSources(Source, Source),
+    /// Lighting reading after a CoreSync change: bit 0 lighting, bit 1 CoreSync.
+    CoreSync(u16),
+    Displays(Vec<DisplayInfo>),
     /// The request failed. `lost` means the monitor itself did not answer (it is reopened next time).
     Failed {
         message: String,
@@ -66,6 +107,13 @@ impl Worker {
         thread::spawn(move || {
             let mut connection: Option<actions::Opened> = None;
             for request in requests {
+                if matches!(request, Request::Discover) {
+                    if replies.send(Reply::Displays(actions::discover())).is_err() {
+                        break;
+                    }
+                    ctx.request_repaint();
+                    continue;
+                }
                 let reply = match connection.take().map_or_else(|| actions::open(bus), Ok) {
                     Ok(mut c) => {
                         let reply = handle(&mut c, request);
@@ -100,8 +148,9 @@ impl Worker {
 
 fn handle(c: &mut actions::Opened, request: Request) -> Reply {
     let m: &mut Monitor = &mut c.monitor;
+    let m = m.as_mut();
     let result = match request {
-        Request::Read(list) => actions::read(m.as_mut(), &list).map(Reply::Read),
+        Request::Read(list) => actions::read(m, &list).map(Reply::Read),
         Request::Caps => m.capabilities().map(|s| Reply::Caps {
             name: c.name.clone(),
             caps: Capabilities::parse(&s),
@@ -112,20 +161,43 @@ fn handle(c: &mut actions::Opened, request: Request) -> Reply {
             allow_unverified,
         } => Ok(Reply::Written {
             feature,
-            result: actions::write(m.as_mut(), feature, value, allow_unverified)
-                .map_err(|e| e.to_string()),
+            result: actions::write(m, feature, value, allow_unverified).map_err(|e| e.to_string()),
         }),
-        Request::Sdm(on) => {
-            actions::set_sdm(m.as_mut(), on).map(|(eb, caps)| Reply::Sdm { eb, caps })
-        }
+        Request::Sdm(on) => actions::set_sdm(m, on).map(|(eb, caps)| Reply::Sdm { eb, caps }),
         Request::ApplyPreset {
             name,
             values,
             allow_unverified,
         } => Ok(Reply::PresetApplied {
             name,
-            report: presets::apply(m.as_mut(), &values, allow_unverified),
+            report: presets::apply(m, &values, allow_unverified),
         }),
+        Request::AimState => actions::aim_state(m).map(|(position, border)| Reply::Aim {
+            position,
+            border: Some(border),
+        }),
+        Request::Act {
+            action,
+            allow_unverified: allow,
+        } => match action {
+            Action::AimMove(dir, steps) => {
+                actions::aim_move(m, dir, steps, allow).map(|position| Reply::Aim {
+                    position,
+                    border: None,
+                })
+            }
+            Action::AimPosition(p) => {
+                actions::aim_position(m, p, allow).map(|position| Reply::Aim {
+                    position,
+                    border: None,
+                })
+            }
+            Action::Pip(cmd) => actions::pip_command(m, cmd, allow).map(Reply::Pip),
+            Action::PipSource(channel, src) => actions::pip_source(m, channel, src, allow)
+                .map(|(main, sub)| Reply::PipSources(main, sub)),
+            Action::CoreSync(on) => actions::set_coresync(m, on, allow).map(Reply::CoreSync),
+        },
+        Request::Discover => unreachable!("answered without a connection"),
     };
     result.unwrap_or_else(|e| Reply::Failed {
         message: e.to_string(),

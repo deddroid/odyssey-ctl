@@ -15,9 +15,9 @@ reverse engineering. Nessun componente del software Samsung è incluso.
 
 - **Immagine**: modalità immagine, luminosità, contrasto, nitidezza, tonalità colore, bilanciamento
   del bianco, Eye Saver.
-- **Gioco**: Equalizzatore del nero, Mirino virtuale; stato di Adaptive-Sync/FreeSync.
+- **Gioco**: Equalizzatore del nero, Mirino virtuale con posizionamento (frecce, coordinate, centratura), Adaptive-Sync/FreeSync.
 - **Luci**: Infinity Core Lighting acceso/spento, effetto e colore.
-- **Ingressi e audio**: sorgente, volume, stato PIP, lingua dell'OSD, modalità PC/AV.
+- **Ingressi e audio**: sorgente, volume, Picture-in-Picture (accensione, dimensione, angolo, ingressi, audio), lingua dell'OSD, modalità PC/AV.
 - **Preset**: salva lo stato attuale con un nome e torna indietro con un clic, anche dall'icona
   nel tray a finestra chiusa. Vengono scritte solo le impostazioni diverse.
 - Ogni scrittura viene riletta dal monitor; le voci che il monitor dichiara non disponibili (per
@@ -128,11 +128,12 @@ Con più monitor collegati, `--bus N` sceglie quale usare.
 
 ## Limiti noti
 
-- Il PIP/PBP si legge ma non si può ancora attivare; Adaptive-Sync è in sola lettura.
 - I nomi dei colori usati da Samsung per le luci non coincidevano con quello che mostravano i LED,
   quindi il colore è un numero (0–47).
-- Modalità immagine, audio PIP e modalità PC/AV sono implementati ma la loro scrittura non è ancora
-  verificata.
+- Audio PIP e modalità PC/AV sono implementati ma la loro scrittura non è ancora verificata.
+- I layout PBP vengono da SDM ma il G60SD non ha il PBP: non provati.
+- Il ripristino del bilanciamento del bianco (`reset-white-balance`) non ha effetto sul G60SD: il registro accetta la scrittura e la ignora.
+- Più monitor: la GUI ne controlla uno alla volta (pagina Monitor); il passaggio non è provato con un secondo monitor.
 - Windows: non provato, vedi sopra.
 - Leggere il monitor in continuazione fa chiudere il suo menu a schermo, perciò l'app non fa mai polling.
 

@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Virtual Aim Point placement: `aim status`, `aim move`, `aim position` (and `--center`); arrows,
+  coordinates and a centre button in the GUI. The stateful `EE`/`EF` registers are read in full
+  cycles.
+- Picture-in-Picture control: `pip on|off|mode|size|position|source|status`; switch, size, corner,
+  input of each window and sound in the GUI.
+- Adaptive-Sync / FreeSync is writable (switch in the Game page); presets can hold it.
+- CoreSync switch in the Lighting page (`coresync on|off`): the Static effect is selected first,
+  as the monitor requires.
+- Monitor page lists the monitors found and switches between them.
+- `--unverified` is a global flag; `features` also lists the actions and their status.
+- `reset-white-balance` (E0 in the LEMON profile) on the command line; no effect on the G60SD.
+
+### Changed
+- Writes that make the monitor re-sync its video (Adaptive-Sync, PIP) wait longer and retry the
+  read-back once after an I/O error.
+
+### Verified on hardware
+- G60SD, firmware 1006.0: picture mode write, Adaptive-Sync, aim point move and position, CoreSync,
+  PIP on/off/size/corner/source.
+
 ## [0.1.0] - 2026-11-06
 
 ### Added

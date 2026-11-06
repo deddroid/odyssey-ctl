@@ -53,6 +53,63 @@ pub fn is_disabled(current: u16, max: u16) -> bool {
     current == DISABLED && max < DISABLED
 }
 
+/// Like [`is_disabled`], knowing the feature: Adaptive-Sync packs "disabled" into its low nibble.
+pub fn disabled(f: &Feature, current: u16, max: u16) -> bool {
+    is_disabled(current, max) || (f.code == 0xF2 && current & 0xF == 0xD)
+}
+
+/// The part of a raw reading that is the feature's value: what a write sets and a preset stores.
+/// Adaptive-Sync keeps its type in the high nibble, the lighting its CoreSync bits above bit 0.
+pub fn state(f: &Feature, raw: u16) -> u16 {
+    match f.code {
+        0xF2 => raw & 0xF,
+        0xF8 => raw & 1,
+        _ => raw,
+    }
+}
+
+/// Operations that are not a single feature value (see `aim`, `pip`, `actions`), with the same
+/// verification record as features so the CLI and GUI can gate them alike.
+pub const ACTIONS: &[(&str, Status, &str)] = &[
+    (
+        "aim-move",
+        Status::Verified,
+        "Virtual Aim Point: move one step (EE)",
+    ),
+    (
+        "aim-position",
+        Status::Verified,
+        "Virtual Aim Point: position (EF)",
+    ),
+    (
+        "pip",
+        Status::Verified,
+        "PIP/PBP: on, off, mode, size, position (E2)",
+    ),
+    (
+        "pip-source",
+        Status::Verified,
+        "PIP/PBP: input of each window (E3)",
+    ),
+    (
+        "coresync",
+        Status::Verified,
+        "CoreSync: lighting follows the screen (F8)",
+    ),
+    (
+        "white-balance-reset",
+        Status::Unverified,
+        "Reset white balance (E0, LEMON profile; no effect on the G60SD)",
+    ),
+];
+
+pub fn action_status(name: &str) -> Option<Status> {
+    ACTIONS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|&(_, s, _)| s)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncState {
     Off,
@@ -261,7 +318,7 @@ pub const FEATURES: &[Feature] = &[
         "picture-mode",
         0x2D,
         "Picture mode (PC mode values)",
-        Status::ReadVerified,
+        Status::Verified,
         PICTURE_MODES,
     ),
     feature(
@@ -295,8 +352,15 @@ pub const FEATURES: &[Feature] = &[
         Status::Standard,
         LANGUAGES,
     ),
-    // F2 packs status (low nibble: 0 off, 1 on, D disabled) and type (high nibble 1 = FreeSync).
-    read_only("adaptive-sync", 0xF2, "Adaptive-Sync / FreeSync"),
+    // F2 packs status (low nibble: 0 off, 1 on, D disabled) and type (high nibble 1 = FreeSync);
+    // only the status is written (see `state`).
+    feature(
+        "adaptive-sync",
+        0xF2,
+        "Adaptive-Sync / FreeSync",
+        Status::Verified,
+        OFF_ON,
+    ),
     feature(
         "aim-point",
         0xED,
@@ -406,6 +470,23 @@ mod tests {
     }
 
     #[test]
+    fn packed_state_and_disabled() {
+        let sync = find("adaptive-sync").unwrap();
+        assert_eq!(state(sync, 0x10), 0);
+        assert_eq!(state(sync, 0x11), 1);
+        assert!(disabled(sync, 0x1D, 1) && !disabled(sync, 0x11, 1));
+        let lighting = find("lighting").unwrap();
+        assert_eq!(state(lighting, 0x03), 1);
+        assert_eq!(state(find("brightness").unwrap(), 42), 42);
+        assert_eq!(action_status("pip"), Some(Status::Verified));
+        assert_eq!(
+            action_status("white-balance-reset"),
+            Some(Status::Unverified)
+        );
+        assert_eq!(action_status("nope"), None);
+    }
+
+    #[test]
     fn dependents_are_known_features() {
         for f in FEATURES {
             for d in dependents(f.name) {
@@ -453,8 +534,10 @@ mod tests {
     fn write_policy() {
         assert!(find("brightness").unwrap().status.safe_to_write());
         assert!(find("contrast").unwrap().status.safe_to_write());
-        assert!(!find("picture-mode").unwrap().status.safe_to_write());
-        assert!(!find("adaptive-sync").unwrap().status.safe_to_write());
+        assert!(find("picture-mode").unwrap().status.safe_to_write());
+        assert!(find("adaptive-sync").unwrap().status.safe_to_write());
+        assert!(!find("adaptive-sync").unwrap().read_only);
+        assert!(!find("pc-av-mode").unwrap().status.safe_to_write());
         assert!(find("aim-point").unwrap().status.safe_to_write());
         assert_eq!(find("aim-point").unwrap().value_name(2), Some("a-red"));
     }

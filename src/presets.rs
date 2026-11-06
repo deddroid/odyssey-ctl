@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::actions;
 use crate::ddc::VcpValue;
 use crate::device::Vcp;
-use crate::features::{self, Feature, is_disabled};
+use crate::features::{self, Feature};
 
 /// Feature name -> value.
 pub type Values = BTreeMap<String, u16>;
@@ -23,6 +23,8 @@ const ORDER: &[&str] = &[
     "sharpness",
     "black-equalizer",
     "aim-point",
+    // Before the lighting: the monitor hides the lighting while Adaptive-Sync is on.
+    "adaptive-sync",
     "lighting",
     "lighting-effect",
     "lighting-color",
@@ -32,10 +34,10 @@ const ORDER: &[&str] = &[
 /// Eye Saver locks brightness, colour and picture mode: switched off before them, on after them.
 const EYE_SAVER: &str = "eye-saver";
 
-/// The value a feature is compared and stored with. For the lighting only bit 0 is the on/off
-/// switch (bits 1-2 are CoreSync).
+/// The value a feature is compared and stored with (the lighting and Adaptive-Sync readings
+/// carry extra bits).
 fn comparable(f: &Feature, raw: u16) -> u16 {
-    if f.name == "lighting" { raw & 1 } else { raw }
+    features::state(f, raw)
 }
 
 /// Current values of the features a preset can hold and `writable` allows.
@@ -47,7 +49,8 @@ pub fn capture(current: &BTreeMap<u8, VcpValue>, writable: impl Fn(&Feature) -> 
         .filter(|f| !f.read_only && writable(f))
         .filter_map(|f| {
             let v = current.get(&f.code)?;
-            (!is_disabled(v.current, v.max)).then(|| (f.name.to_string(), comparable(f, v.current)))
+            (!features::disabled(f, v.current, v.max))
+                .then(|| (f.name.to_string(), comparable(f, v.current)))
         })
         .collect()
 }
@@ -103,7 +106,7 @@ pub fn apply(m: &mut dyn Vcp, target: &Values, allow_unverified: bool) -> Report
                 continue;
             }
         };
-        if is_disabled(now.current, now.max) {
+        if features::disabled(f, now.current, now.max) {
             report.skipped.push(f);
         } else if comparable(f, now.current) != t {
             match actions::write_from(m, f, now, t) {
@@ -133,7 +136,8 @@ mod tests {
         let values = capture(&readings(&mut d), |f| f.status.safe_to_write());
         assert_eq!(values["brightness"], 50);
         assert_eq!(values["lighting"], 1);
-        assert!(!values.contains_key("picture-mode")); // not writable without the unverified switch
+        assert_eq!(values["picture-mode"], 8); // verified, so presets hold it by default
+        assert_eq!(values["adaptive-sync"], 0); // state only, not the raw 0x10
         assert!(!values.contains_key("lighting-color")); // 0xFD in the snapshot
         assert!(!values.contains_key("input") && !values.contains_key("language"));
         let all = capture(&readings(&mut d), |_| true);
