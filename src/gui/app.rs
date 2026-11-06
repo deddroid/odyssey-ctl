@@ -15,7 +15,7 @@ use odyssey_ctl::pip::{self, Channel, Source};
 use odyssey_ctl::presets as preset_logic;
 
 use crate::i18n::{Lang, tr};
-use crate::presets::{Preset, Presets};
+use crate::presets::{AimSpot, Preset, Presets};
 use crate::settings::Settings;
 use crate::theme::{self, ACCENT, ERR, OK, TEXT_DIM, WARN, dim};
 use crate::worker::{Action, Reply, Request, Worker};
@@ -114,6 +114,8 @@ pub struct App {
     /// Coordinates being typed for the aim point.
     aim_target: Option<Position>,
     aim_steps: u16,
+    /// Name typed for a saved crosshair position.
+    aim_name: String,
     displays: Option<Vec<DisplayInfo>>,
 }
 
@@ -166,6 +168,7 @@ impl App {
             aim_border: None,
             aim_target: None,
             aim_steps: 10,
+            aim_name: String::new(),
             displays: None,
         };
         app.load(true);
@@ -352,6 +355,9 @@ impl App {
                     self.aim_target = None;
                     if border.is_some() {
                         self.aim_border = border;
+                    } else {
+                        // After a move: show at once if the monitor switched the icon off.
+                        self.reread(&["aim-point"]);
                     }
                 }
                 Reply::Pip(status) => {
@@ -898,8 +904,9 @@ impl App {
         });
     }
 
-    /// Arrows, coordinates and a centre button for the crosshair. Its position and border are
-    /// read when first shown (stateful registers, so never with the other features).
+    /// Screen outline to click on, arrows, coordinates, centre button and saved positions for
+    /// the crosshair. Its position and border are read when first shown (stateful registers,
+    /// so never with the other features).
     fn aim_pad(&mut self, ui: &mut egui::Ui) {
         if self.aim_position.is_none() && !self.busy() {
             self.request(Request::AimState);
@@ -917,7 +924,21 @@ impl App {
         let mut target = None;
         theme::row(ui, &label, |ui| {
             ui.add_enabled_ui(enabled, |ui| {
+                if let Some(b) = self.aim_border {
+                    if let Some(p) = screen_pad(ui, b, pos, self.aim_target) {
+                        target = Some(p);
+                    }
+                    ui.add_space(16.0);
+                }
                 ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(dim(self.t("aim.steps")));
+                        for n in [1u16, 10, 50] {
+                            if theme::chip(ui, self.aim_steps == n, &n.to_string()) {
+                                self.aim_steps = n;
+                            }
+                        }
+                    });
                     ui.horizontal(|ui| {
                         ui.add_space(34.0);
                         if ui.button(" ▲ ").clicked() {
@@ -937,17 +958,6 @@ impl App {
                         ui.add_space(34.0);
                         if ui.button(" ▼ ").clicked() {
                             moved = Some(Move::Down);
-                        }
-                    });
-                });
-                ui.add_space(16.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(dim(self.t("aim.steps")));
-                        for n in [1u16, 10, 50] {
-                            if theme::chip(ui, self.aim_steps == n, &n.to_string()) {
-                                self.aim_steps = n;
-                            }
                         }
                     });
                     ui.horizontal(|ui| {
@@ -985,8 +995,62 @@ impl App {
                 });
             });
         });
+        ui.label(dim(self.t("aim.pad_hint")));
         if !allowed {
             self.lock_label(ui);
+        }
+        ui.add_space(6.0);
+        let label = self.t("aim.saved");
+        let mut save = false;
+        let mut delete = None;
+        theme::row(ui, &label, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, spot) in self.presets.aim.iter().enumerate() {
+                    let here = Position {
+                        x: spot.x,
+                        y: spot.y,
+                    };
+                    let text = format!("{} ({}, {})", spot.name, spot.x, spot.y);
+                    if theme::chip(ui, here == pos, &text) && enabled && here != pos {
+                        target = Some(here);
+                    }
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text(self.t("delete"))
+                        .clicked()
+                    {
+                        delete = Some(i);
+                    }
+                    ui.add_space(6.0);
+                }
+                let hint = self.t("aim.name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.aim_name)
+                        .hint_text(hint)
+                        .desired_width(110.0),
+                );
+                let can = !self.aim_name.trim().is_empty();
+                if ui
+                    .add_enabled(can, egui::Button::new(self.t("aim.save")))
+                    .clicked()
+                {
+                    save = true;
+                }
+            });
+        });
+        if save {
+            let name = self.aim_name.trim().to_string();
+            self.presets.put_aim(AimSpot {
+                name,
+                x: pos.x,
+                y: pos.y,
+            });
+            self.aim_name.clear();
+            self.save_presets();
+        }
+        if let Some(i) = delete {
+            self.presets.aim.remove(i);
+            self.save_presets();
         }
         if let Some(dir) = moved {
             let steps = self.aim_steps;
@@ -1337,6 +1401,71 @@ impl App {
             });
         });
     }
+}
+
+/// A 16:9 outline standing for the screen, with the crosshair's allowed area mapped onto it.
+/// Draws the current position (and the one being typed) and returns the position clicked.
+fn screen_pad(
+    ui: &mut egui::Ui,
+    border: Border,
+    pos: Position,
+    draft: Option<Position>,
+) -> Option<Position> {
+    let size = Vec2::new(256.0, 144.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let inner = rect.shrink(6.0);
+    let to_pad = |p: Position| {
+        let fx = (f32::from(p.x.saturating_sub(border.x)) / f32::from(border.width.max(1)))
+            .clamp(0.0, 1.0);
+        let fy = (f32::from(p.y.saturating_sub(border.y)) / f32::from(border.height.max(1)))
+            .clamp(0.0, 1.0);
+        egui::pos2(
+            inner.left() + fx * inner.width(),
+            inner.top() + fy * inner.height(),
+        )
+    };
+    let painter = ui.painter();
+    let outline = if ui.is_enabled() {
+        TEXT_DIM
+    } else {
+        TEXT_DIM.gamma_multiply(0.5)
+    };
+    painter.rect(
+        rect,
+        6.0,
+        theme::CONTROL,
+        Stroke::new(1.0, outline),
+        egui::StrokeKind::Inside,
+    );
+    // Stand for the monitor.
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x, rect.bottom()),
+            egui::pos2(rect.center().x, rect.bottom() + 4.0),
+        ],
+        Stroke::new(2.0, outline),
+    );
+    if let Some(d) = draft {
+        painter.circle_stroke(to_pad(d), 5.0, Stroke::new(1.0, WARN));
+    }
+    let c = to_pad(pos);
+    let arm = Vec2::new(11.0, 0.0);
+    painter.line_segment([c - arm, c + arm], Stroke::new(1.5, ACCENT));
+    painter.line_segment([c - arm.yx(), c + arm.yx()], Stroke::new(1.5, ACCENT));
+    painter.circle_stroke(c, 6.0, Stroke::new(2.0, ACCENT));
+    if response.hovered() && ui.is_enabled() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+    if !response.clicked() {
+        return None;
+    }
+    let p = response.interact_pointer_pos()?;
+    let fx = ((p.x - inner.left()) / inner.width()).clamp(0.0, 1.0);
+    let fy = ((p.y - inner.top()) / inner.height()).clamp(0.0, 1.0);
+    Some(Position {
+        x: border.x + (fx * f32::from(border.width)).round() as u16,
+        y: border.y + (fy * f32::from(border.height)).round() as u16,
+    })
 }
 
 impl eframe::App for App {

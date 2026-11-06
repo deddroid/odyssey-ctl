@@ -186,7 +186,12 @@ pub fn aim_move(
 ) -> Result<aim::Position, Error> {
     check_action("aim-move", allow_unverified)?;
     check_aim_on(m)?;
-    for _ in 0..steps.max(1) {
+    for i in 0..steps.max(1) {
+        if i > 0 {
+            // Steps sent back to back get dropped by the firmware (10 steps moved 6-8 units
+            // instead of 20); SDM sends one per key press.
+            sleep(Duration::from_millis(80));
+        }
         aim::step(m, dir)?;
     }
     sleep(Duration::from_millis(200));

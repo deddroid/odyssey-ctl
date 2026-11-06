@@ -184,6 +184,14 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("aim.apply", "Apply", "Applica"),
     ("aim.at", "Aim point at {x}, {y}", "Mirino in {x}, {y}"),
     (
+        "aim.pad_hint",
+        "Click on the screen outline where the crosshair should be, then fine-tune with the arrows.",
+        "Clicca sulla sagoma dello schermo dove vuoi il mirino, poi rifinisci con le frecce.",
+    ),
+    ("aim.saved", "Saved positions", "Posizioni salvate"),
+    ("aim.save", "Save position", "Salva posizione"),
+    ("aim.name", "Name", "Nome"),
+    (
         "card.sync",
         "Adaptive-Sync / FreeSync",
         "Adaptive-Sync / FreeSync",

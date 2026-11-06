@@ -7,9 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- Virtual Aim Point placement: `aim status`, `aim move`, `aim position` (and `--center`); arrows,
-  coordinates and a centre button in the GUI. The stateful `EE`/`EF` registers are read in full
-  cycles.
+- Virtual Aim Point placement: `aim status`, `aim move`, `aim position` (and `--center`). In the
+  GUI: a screen outline to click on, arrows, coordinates, a centre button and saved positions
+  (`[[aim]]` in `presets.toml`). The stateful `EE`/`EF` registers are read in full cycles.
 - Picture-in-Picture control: `pip on|off|mode|size|position|source|status`; switch, size, corner,
   input of each window and sound in the GUI.
 - Adaptive-Sync / FreeSync is writable (switch in the Game page); presets can hold it.

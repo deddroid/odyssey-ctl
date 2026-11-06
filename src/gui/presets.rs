@@ -15,10 +15,20 @@ pub struct Preset {
     pub values: Values,
 }
 
+/// A saved crosshair position (firmware units, see `odyssey_ctl::aim`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimSpot {
+    pub name: String,
+    pub x: u16,
+    pub y: u16,
+}
+
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Presets {
     #[serde(default, rename = "preset")]
     pub list: Vec<Preset>,
+    #[serde(default, rename = "aim")]
+    pub aim: Vec<AimSpot>,
 }
 
 impl Presets {
@@ -39,6 +49,18 @@ impl Presets {
         {
             Some(existing) => *existing = preset,
             None => self.list.push(preset),
+        }
+    }
+
+    /// Adds a crosshair position, or replaces the one with the same name (case-insensitive).
+    pub fn put_aim(&mut self, spot: AimSpot) {
+        match self
+            .aim
+            .iter_mut()
+            .find(|a| a.name.eq_ignore_ascii_case(&spot.name))
+        {
+            Some(existing) => *existing = spot,
+            None => self.aim.push(spot),
         }
     }
 }
@@ -69,8 +91,28 @@ mod tests {
             name: "Notte".into(),
             values,
         });
+        p.put_aim(AimSpot {
+            name: "Head".into(),
+            x: 849,
+            y: 200,
+        });
+        p.put_aim(AimSpot {
+            name: "head".into(),
+            x: 849,
+            y: 210,
+        });
+        assert_eq!(p.aim.len(), 1);
+        assert_eq!(p.aim[0].y, 210);
         let text = toml::to_string(&p).unwrap();
         assert!(text.contains("[[preset]]") && text.contains("name = \"Notte\""));
+        assert!(text.contains("[[aim]]"));
         assert_eq!(toml::from_str::<Presets>(&text).unwrap(), p);
+        // Files from 0.1.0 have no [[aim]] table.
+        assert!(
+            toml::from_str::<Presets>("[[preset]]\nname = \"a\"\n[preset.values]\n")
+                .unwrap()
+                .aim
+                .is_empty()
+        );
     }
 }
