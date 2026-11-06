@@ -14,9 +14,9 @@ it. Nothing from Samsung's software is included.
 ## Features
 
 - **Picture**: picture mode, brightness, contrast, sharpness, colour tone, white balance, Eye Saver.
-- **Game**: Black Equalizer, Virtual Aim Point; Adaptive-Sync/FreeSync status.
+- **Game**: Black Equalizer, Virtual Aim Point with placement (arrows, coordinates, centre), Adaptive-Sync/FreeSync.
 - **Lighting**: Infinity Core Lighting on/off, effect and colour.
-- **Inputs & audio**: input source, volume, PIP status, OSD language, PC/AV mode.
+- **Inputs & audio**: input source, volume, Picture-in-Picture (on/off, size, corner, inputs, sound), OSD language, PC/AV mode.
 - **Presets**: save the current state by name and get back to it with one click, also from the
   tray icon with the window closed. Only the settings that differ are written.
 - Every write is read back from the monitor; settings the monitor reports as unavailable (for
@@ -126,10 +126,12 @@ Use `--bus N` to pick a monitor when more than one is connected.
 
 ## Known limits
 
-- PIP/PBP can be read but not switched yet; Adaptive-Sync is read-only.
 - The colour names Samsung uses for the lighting did not match what the LEDs showed, so the
   colour is a number (0–47).
-- Picture mode, PIP sound and PC/AV mode are implemented but their writes are still unverified.
+- PIP sound and PC/AV mode are implemented but their writes are still unverified.
+- PBP layouts are implemented from SDM but the G60SD has no PBP; untested.
+- The white balance reset (`reset-white-balance`) has no effect on the G60SD: the register is accepted but ignored.
+- Several monitors: the GUI controls one at a time (Monitor page); switching is untested with a second monitor.
 - Windows: untested, see above.
 - Reading the monitor continuously makes its on-screen menu close, so the app never polls.
 
