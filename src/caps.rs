@@ -29,11 +29,15 @@ pub enum Profile {
 
 impl Capabilities {
     pub fn parse(raw: &str) -> Self {
-        let raw = raw.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string();
+        let raw = raw
+            .trim_matches(|c: char| c == '\0' || c.is_whitespace())
+            .to_string();
         Capabilities {
             model: field(&raw, "model").map(|s| s.trim().to_string()),
             mccs_version: field(&raw, "mccs_ver").map(|s| s.trim().to_string()),
-            vcp: field_start(&raw, "vcp").map(parse_vcp_list).unwrap_or_default(),
+            vcp: field_start(&raw, "vcp")
+                .map(parse_vcp_list)
+                .unwrap_or_default(),
             raw,
         }
     }
@@ -86,14 +90,21 @@ fn parse_vcp_list(s: &str) -> BTreeMap<u8, Vec<u8>> {
             Some('(') => {
                 let end = rest.find(')').unwrap_or(rest.len());
                 if let Some(code) = last {
-                    let values = rest[1..end].split_whitespace().filter_map(hex_byte).collect();
+                    let values = rest[1..end]
+                        .split_whitespace()
+                        .filter_map(hex_byte)
+                        .collect();
                     map.insert(code, values);
                 }
                 rest = rest.get(end + 1..).unwrap_or("");
             }
             Some(_) => {
-                let end = rest.find(|c: char| c.is_whitespace() || c == '(' || c == ')').unwrap_or(rest.len());
-                let Some(code) = hex_byte(&rest[..end]) else { break };
+                let end = rest
+                    .find(|c: char| c.is_whitespace() || c == '(' || c == ')')
+                    .unwrap_or(rest.len());
+                let Some(code) = hex_byte(&rest[..end]) else {
+                    break;
+                };
                 map.entry(code).or_insert_with(Vec::new);
                 last = Some(code);
                 rest = &rest[end..];
@@ -104,7 +115,11 @@ fn parse_vcp_list(s: &str) -> BTreeMap<u8, Vec<u8>> {
 }
 
 fn hex_byte(s: &str) -> Option<u8> {
-    if s.len() == 2 { u8::from_str_radix(s, 16).ok() } else { None }
+    if s.len() == 2 {
+        u8::from_str_radix(s, 16).ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +166,9 @@ mod tests {
         let c = Capabilities::parse("\0\0garbage(");
         assert_eq!(c.model, None);
         assert!(c.vcp.is_empty());
-        assert_eq!(Capabilities::parse("").profile(), Profile::Other(String::new()));
+        assert_eq!(
+            Capabilities::parse("").profile(),
+            Profile::Other(String::new())
+        );
     }
 }

@@ -117,7 +117,10 @@ pub fn parse_vcp_reply(buf: &[u8], expected: u8) -> Result<VcpValue, ReplyError>
         return Err(ReplyError::BadLength);
     }
     if p[2] != expected {
-        return Err(ReplyError::WrongCode { expected, got: p[2] });
+        return Err(ReplyError::WrongCode {
+            expected,
+            got: p[2],
+        });
     }
     if p[1] != 0 {
         return Err(ReplyError::Unsupported(expected));
@@ -161,41 +164,74 @@ mod tests {
 
     #[test]
     fn set_request_bytes() {
-        assert_eq!(set_vcp_request(0x2F, 6), [0x51, 0x84, 0x03, 0x2F, 0x00, 0x06, 0x91]);
-        assert_eq!(set_vcp_request(0x10, 45), [0x51, 0x84, 0x03, 0x10, 0x00, 0x2D, 0x85]);
-        assert_eq!(set_vcp_request(0xEB, 0xA1), [0x51, 0x84, 0x03, 0xEB, 0x00, 0xA1, 0xF2]);
+        assert_eq!(
+            set_vcp_request(0x2F, 6),
+            [0x51, 0x84, 0x03, 0x2F, 0x00, 0x06, 0x91]
+        );
+        assert_eq!(
+            set_vcp_request(0x10, 45),
+            [0x51, 0x84, 0x03, 0x10, 0x00, 0x2D, 0x85]
+        );
+        assert_eq!(
+            set_vcp_request(0xEB, 0xA1),
+            [0x51, 0x84, 0x03, 0xEB, 0x00, 0xA1, 0xF2]
+        );
     }
 
     #[test]
     fn capabilities_request_bytes() {
         // 51 83 F3 00 00, checksum 6E^51^83^F3 = 0x4F
-        assert_eq!(capabilities_request(0), [0x51, 0x83, 0xF3, 0x00, 0x00, 0x4F]);
+        assert_eq!(
+            capabilities_request(0),
+            [0x51, 0x83, 0xF3, 0x00, 0x00, 0x4F]
+        );
     }
 
     #[test]
     fn parses_vcp_reply() {
-        let r = [0x6E, 0x88, 0x02, 0x00, 0x10, 0x00, 0x00, 0x32, 0x00, 0x32, 0xA4];
+        let r = [
+            0x6E, 0x88, 0x02, 0x00, 0x10, 0x00, 0x00, 0x32, 0x00, 0x32, 0xA4,
+        ];
         let v = parse_vcp_reply(&r, 0x10).unwrap();
         assert_eq!((v.code, v.kind, v.max, v.current), (0x10, 0, 50, 50));
-        let r = [0x6E, 0x88, 0x02, 0x00, 0xEB, 0x00, 0x00, 0xB1, 0x00, 0xA1, 0x4F];
+        let r = [
+            0x6E, 0x88, 0x02, 0x00, 0xEB, 0x00, 0x00, 0xB1, 0x00, 0xA1, 0x4F,
+        ];
         assert_eq!(parse_vcp_reply(&r, 0xEB).unwrap().current, 0xA1);
     }
 
     #[test]
     fn rejects_bad_vcp_replies() {
-        let mut r = [0x6E, 0x88, 0x02, 0x00, 0x10, 0x00, 0x00, 0x32, 0x00, 0x32, 0xA4];
-        assert_eq!(parse_vcp_reply(&r, 0x12), Err(ReplyError::WrongCode { expected: 0x12, got: 0x10 }));
+        let mut r = [
+            0x6E, 0x88, 0x02, 0x00, 0x10, 0x00, 0x00, 0x32, 0x00, 0x32, 0xA4,
+        ];
+        assert_eq!(
+            parse_vcp_reply(&r, 0x12),
+            Err(ReplyError::WrongCode {
+                expected: 0x12,
+                got: 0x10
+            })
+        );
         r[9] = 0x31;
         assert_eq!(parse_vcp_reply(&r, 0x10), Err(ReplyError::BadChecksum));
-        assert_eq!(parse_vcp_reply(&[0x6E, 0x80, 0xBE], 0x10), Err(ReplyError::Null));
-        assert_eq!(parse_vcp_reply(&[0xFF; 11], 0x10), Err(ReplyError::BadLength));
+        assert_eq!(
+            parse_vcp_reply(&[0x6E, 0x80, 0xBE], 0x10),
+            Err(ReplyError::Null)
+        );
+        assert_eq!(
+            parse_vcp_reply(&[0xFF; 11], 0x10),
+            Err(ReplyError::BadLength)
+        );
     }
 
     #[test]
     fn unsupported_code_result() {
         let mut r = vec![0x6E, 0x88, 0x02, 0x01, 0xE7, 0x00, 0x00, 0x00, 0x00, 0x00];
         r.push(checksum(0x50, &r));
-        assert_eq!(parse_vcp_reply(&r, 0xE7), Err(ReplyError::Unsupported(0xE7)));
+        assert_eq!(
+            parse_vcp_reply(&r, 0xE7),
+            Err(ReplyError::Unsupported(0xE7))
+        );
     }
 
     #[test]
@@ -206,13 +242,21 @@ mod tests {
         assert_eq!(parse_capabilities_reply(&r, 0x20).unwrap(), b"(prot");
         assert_eq!(
             parse_capabilities_reply(&r, 0),
-            Err(ReplyError::WrongOffset { expected: 0, got: 0x20 })
+            Err(ReplyError::WrongOffset {
+                expected: 0,
+                got: 0x20
+            })
         );
     }
 
     #[test]
     fn value_bytes() {
-        let v = VcpValue { code: 0xE3, kind: 0, max: 0x5151, current: 0x0102 };
+        let v = VcpValue {
+            code: 0xE3,
+            kind: 0,
+            max: 0x5151,
+            current: 0x0102,
+        };
         assert_eq!(v.bytes(), [0x51, 0x51, 0x01, 0x02]);
     }
 }

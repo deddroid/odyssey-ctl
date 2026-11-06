@@ -50,7 +50,9 @@ impl Edid {
 
 fn descriptor_text(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0x0A).unwrap_or(bytes.len());
-    String::from_utf8_lossy(&bytes[..end]).trim_end().to_string()
+    String::from_utf8_lossy(&bytes[..end])
+        .trim_end()
+        .to_string()
 }
 
 #[cfg(test)]

@@ -50,7 +50,8 @@ pub fn load_toml<T: serde::de::DeserializeOwned + Default>(name: &str) -> T {
 }
 
 pub fn save_toml<T: Serialize>(name: &str, value: &T) -> std::io::Result<()> {
-    let path = config_file(name).ok_or_else(|| std::io::Error::other("no configuration directory"))?;
+    let path =
+        config_file(name).ok_or_else(|| std::io::Error::other("no configuration directory"))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -74,7 +75,12 @@ mod tests {
 
     #[test]
     fn round_trip_and_defaults() {
-        let s = Settings { language: Lang::It, allow_unverified: true, start_hidden: true, ..Default::default() };
+        let s = Settings {
+            language: Lang::It,
+            allow_unverified: true,
+            start_hidden: true,
+            ..Default::default()
+        };
         let text = toml::to_string(&s).unwrap();
         assert!(text.contains("language = \"it\"") && text.contains("start_hidden = true"));
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), s);

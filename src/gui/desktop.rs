@@ -6,9 +6,9 @@
 //!   `HKCU\…\Run`.
 //! * Both: a second launch only asks the running instance to show itself (local socket).
 
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
 
 use eframe::egui;
 
@@ -56,7 +56,11 @@ pub fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 pub fn window_icon() -> Option<egui::IconData> {
-    decode_png(ICON_PNG).map(|(rgba, width, height)| egui::IconData { rgba, width, height })
+    decode_png(ICON_PNG).map(|(rgba, width, height)| egui::IconData {
+        rgba,
+        width,
+        height,
+    })
 }
 
 // ---- single instance --------------------------------------------------------
@@ -123,7 +127,10 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
             self.icon.clone()
         }
         fn tool_tip(&self) -> ksni::ToolTip {
-            ksni::ToolTip { title: self.labels.tooltip.clone(), ..Default::default() }
+            ksni::ToolTip {
+                title: self.labels.tooltip.clone(),
+                ..Default::default()
+            }
         }
         fn activate(&mut self, _x: i32, _y: i32) {
             let _ = self.tx.send(Cmd::Show);
@@ -145,8 +152,19 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
             };
             let mut items = vec![item(self.labels.show.clone(), Cmd::Show)];
             if !self.preset_names.is_empty() {
-                let presets = self.preset_names.iter().map(|n| item(n.clone(), Cmd::Preset(n.clone()))).collect();
-                items.push(SubMenu { label: self.labels.presets.clone(), submenu: presets, ..Default::default() }.into());
+                let presets = self
+                    .preset_names
+                    .iter()
+                    .map(|n| item(n.clone(), Cmd::Preset(n.clone())))
+                    .collect();
+                items.push(
+                    SubMenu {
+                        label: self.labels.presets.clone(),
+                        submenu: presets,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
             }
             items.push(ksni::MenuItem::Separator);
             items.push(item(self.labels.quit.clone(), Cmd::Quit));
@@ -157,20 +175,40 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
     // StatusNotifierItem wants ARGB32 in network byte order.
     let icon = decode_png(TRAY_PNG)
         .map(|(rgba, w, h)| {
-            let data = rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
-            vec![ksni::Icon { width: w as i32, height: h as i32, data }]
+            let data = rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| [p[3], p[0], p[1], p[2]])
+                .collect();
+            vec![ksni::Icon {
+                width: w as i32,
+                height: h as i32,
+                data,
+            }]
         })
         .unwrap_or_default();
     let preset_names = Presets::load().list.into_iter().map(|p| p.name).collect();
     std::thread::Builder::new()
         .name("odyssey-tray".into())
         .spawn(move || {
-            let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
                 return;
             };
             rt.block_on(async move {
                 // No tray host (e.g. a bare compositor): keep running without one.
-                if let Ok(_handle) = (Tray { tx, labels, icon, preset_names }).spawn().await {
+                if let Ok(_handle) = (Tray {
+                    tx,
+                    labels,
+                    icon,
+                    preset_names,
+                })
+                .spawn()
+                .await
+                {
                     std::future::pending::<()>().await;
                 }
             });
@@ -209,7 +247,9 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
                 let _ = menu.append(&sub);
             }
             let _ = menu.append_items(&[&PredefinedMenuItem::separator(), &quit]);
-            let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(&labels.tooltip);
+            let mut builder = TrayIconBuilder::new()
+                .with_menu(Box::new(menu))
+                .with_tooltip(&labels.tooltip);
             if let Some((rgba, w, h)) = decode_png(TRAY_PNG)
                 && let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h)
             {
@@ -230,7 +270,9 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
                         Cmd::Show
                     } else if ev.id == *quit.id() {
                         Cmd::Quit
-                    } else if let Some((_, name)) = presets.iter().find(|(item, _)| ev.id == *item.id()) {
+                    } else if let Some((_, name)) =
+                        presets.iter().find(|(item, _)| ev.id == *item.id())
+                    {
                         Cmd::Preset(name.clone())
                     } else {
                         continue;
@@ -240,7 +282,10 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
                     }
                 }
                 while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = ev
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        ..
+                    } = ev
                         && tx.send(Cmd::Show).is_err()
                     {
                         return;
@@ -299,8 +344,8 @@ fn platform_autostart(enabled: bool, exe: &std::path::Path) -> std::io::Result<(
 fn platform_autostart(enabled: bool, exe: &std::path::Path) -> std::io::Result<()> {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
-    let (run, _) =
-        RegKey::predef(HKEY_CURRENT_USER).create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")?;
+    let (run, _) = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")?;
     if enabled {
         run.set_value("odyssey-ctl", &format!("\"{}\" --hidden", exe.display()))
     } else {

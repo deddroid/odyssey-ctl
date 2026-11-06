@@ -15,20 +15,43 @@ use odyssey_ctl::presets;
 pub enum Request {
     Read(Vec<&'static Feature>),
     Caps,
-    Write { feature: &'static Feature, value: u16, allow_unverified: bool },
+    Write {
+        feature: &'static Feature,
+        value: u16,
+        allow_unverified: bool,
+    },
     Sdm(bool),
-    ApplyPreset { name: String, values: presets::Values, allow_unverified: bool },
+    ApplyPreset {
+        name: String,
+        values: presets::Values,
+        allow_unverified: bool,
+    },
 }
 
 pub enum Reply {
     Read(Vec<Reading>),
     /// Capabilities plus the monitor name from the EDID.
-    Caps { name: Option<String>, caps: Capabilities },
-    Written { feature: &'static Feature, result: Result<Change, String> },
-    Sdm { eb: u16, caps: Capabilities },
-    PresetApplied { name: String, report: presets::Report },
+    Caps {
+        name: Option<String>,
+        caps: Capabilities,
+    },
+    Written {
+        feature: &'static Feature,
+        result: Result<Change, String>,
+    },
+    Sdm {
+        eb: u16,
+        caps: Capabilities,
+    },
+    PresetApplied {
+        name: String,
+        report: presets::Report,
+    },
     /// The request failed. `lost` means the monitor itself did not answer (it is reopened next time).
-    Failed { message: String, lost: bool },
+    Failed {
+        message: String,
+        lost: bool,
+    },
 }
 
 pub struct Worker {
@@ -51,7 +74,10 @@ impl Worker {
                         }
                         reply
                     }
-                    Err(e) => Reply::Failed { message: e.to_string(), lost: true },
+                    Err(e) => Reply::Failed {
+                        message: e.to_string(),
+                        lost: true,
+                    },
                 };
                 if replies.send(reply).is_err() {
                     break;
@@ -76,17 +102,33 @@ fn handle(c: &mut actions::Opened, request: Request) -> Reply {
     let m: &mut Monitor = &mut c.monitor;
     let result = match request {
         Request::Read(list) => actions::read(m.as_mut(), &list).map(Reply::Read),
-        Request::Caps => m
-            .capabilities()
-            .map(|s| Reply::Caps { name: c.name.clone(), caps: Capabilities::parse(&s) }),
-        Request::Write { feature, value, allow_unverified } => Ok(Reply::Written {
-            feature,
-            result: actions::write(m.as_mut(), feature, value, allow_unverified).map_err(|e| e.to_string()),
+        Request::Caps => m.capabilities().map(|s| Reply::Caps {
+            name: c.name.clone(),
+            caps: Capabilities::parse(&s),
         }),
-        Request::Sdm(on) => actions::set_sdm(m.as_mut(), on).map(|(eb, caps)| Reply::Sdm { eb, caps }),
-        Request::ApplyPreset { name, values, allow_unverified } => {
-            Ok(Reply::PresetApplied { name, report: presets::apply(m.as_mut(), &values, allow_unverified) })
+        Request::Write {
+            feature,
+            value,
+            allow_unverified,
+        } => Ok(Reply::Written {
+            feature,
+            result: actions::write(m.as_mut(), feature, value, allow_unverified)
+                .map_err(|e| e.to_string()),
+        }),
+        Request::Sdm(on) => {
+            actions::set_sdm(m.as_mut(), on).map(|(eb, caps)| Reply::Sdm { eb, caps })
         }
+        Request::ApplyPreset {
+            name,
+            values,
+            allow_unverified,
+        } => Ok(Reply::PresetApplied {
+            name,
+            report: presets::apply(m.as_mut(), &values, allow_unverified),
+        }),
     };
-    result.unwrap_or_else(|e| Reply::Failed { message: e.to_string(), lost: matches!(e, Error::Io(_)) })
+    result.unwrap_or_else(|e| Reply::Failed {
+        message: e.to_string(),
+        lost: matches!(e, Error::Io(_)),
+    })
 }

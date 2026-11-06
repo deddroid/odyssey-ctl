@@ -72,9 +72,11 @@ pub fn order(target: &Values) -> Vec<(&'static Feature, u16)> {
 /// True when every value of `target` matches `current`.
 pub fn matches(target: &Values, current: &BTreeMap<u8, VcpValue>) -> bool {
     !target.is_empty()
-        && order(target)
-            .iter()
-            .all(|(f, t)| current.get(&f.code).is_some_and(|v| comparable(f, v.current) == *t))
+        && order(target).iter().all(|(f, t)| {
+            current
+                .get(&f.code)
+                .is_some_and(|v| comparable(f, v.current) == *t)
+        })
 }
 
 #[derive(Debug, Default)]
@@ -119,7 +121,10 @@ mod tests {
     use crate::demo::DemoDevice;
 
     fn readings(d: &mut DemoDevice) -> BTreeMap<u8, VcpValue> {
-        features::FEATURES.iter().filter_map(|f| Some((f.code, d.get_vcp(f.code).ok()?))).collect()
+        features::FEATURES
+            .iter()
+            .filter_map(|f| Some((f.code, d.get_vcp(f.code).ok()?)))
+            .collect()
     }
 
     #[test]

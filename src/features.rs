@@ -76,7 +76,10 @@ pub fn decode_adaptive_sync(v: u16) -> AdaptiveSync {
         0xD => SyncState::Disabled,
         _ => SyncState::Off,
     };
-    AdaptiveSync { state, freesync: v & 0xF0 == 0x10 }
+    AdaptiveSync {
+        state,
+        freesync: v & 0xF0 == 0x10,
+    }
 }
 
 /// PIP/PBP status reading (VCP E2), the fields odyssey-ctl shows.
@@ -88,7 +91,11 @@ pub struct PipStatus {
 }
 
 pub fn decode_pip_status(v: u16) -> PipStatus {
-    PipStatus { on: v & 1 != 0, pip_supported: v & 0x1000 != 0, pbp_supported: v & 0x2000 != 0 }
+    PipStatus {
+        on: v & 1 != 0,
+        pip_supported: v & 0x1000 != 0,
+        pbp_supported: v & 0x2000 != 0,
+    }
 }
 
 /// Name of a PIP/PBP source code (`type << 4 | n`, as in VCP E3).
@@ -107,13 +114,19 @@ pub fn source_name(code: u8) -> Option<String> {
 
 impl Feature {
     pub fn value_name(&self, value: u16) -> Option<&'static str> {
-        self.values.iter().find(|(v, _)| *v == value).map(|(_, n)| *n)
+        self.values
+            .iter()
+            .find(|(v, _)| *v == value)
+            .map(|(_, n)| *n)
     }
 
     /// Accepts a number (decimal or 0x hex) or one of the value names.
     pub fn parse_value(&self, s: &str) -> Option<u16> {
         parse_number(s).or_else(|| {
-            self.values.iter().find(|(_, n)| n.eq_ignore_ascii_case(s)).map(|(v, _)| *v)
+            self.values
+                .iter()
+                .find(|(_, n)| n.eq_ignore_ascii_case(s))
+                .map(|(v, _)| *v)
         })
     }
 }
@@ -141,7 +154,13 @@ const PICTURE_MODES: &[(u16, &str)] = &[
 const INPUTS: &[(u16, &str)] = &[(0x0F, "displayport"), (0x11, "hdmi1"), (0x12, "hdmi2")];
 
 // Value names below come from Samsung Display Manager's Swift enums (docs/PROTOCOL.md).
-const COLOR_TONES: &[(u16, &str)] = &[(0, "cool"), (1, "standard"), (2, "warm1"), (3, "warm2"), (4, "natural")];
+const COLOR_TONES: &[(u16, &str)] = &[
+    (0, "cool"),
+    (1, "standard"),
+    (2, "warm1"),
+    (3, "warm2"),
+    (4, "natural"),
+];
 const EYE_SAVER: &[(u16, &str)] = &[(0, "off"), (1, "low"), (2, "high")];
 const OFF_ON: &[(u16, &str)] = &[(0, "off"), (1, "on")];
 const PC_AV: &[(u16, &str)] = &[(0, "pc"), (1, "av")];
@@ -192,39 +211,131 @@ const fn feature(
     status: Status,
     values: &'static [(u16, &'static str)],
 ) -> Feature {
-    Feature { name, code, label, status, values, read_only: false }
+    Feature {
+        name,
+        code,
+        label,
+        status,
+        values,
+        read_only: false,
+    }
 }
 
 const fn read_only(name: &'static str, code: u8, label: &'static str) -> Feature {
-    Feature { name, code, label, status: Status::Unverified, values: &[], read_only: true }
+    Feature {
+        name,
+        code,
+        label,
+        status: Status::Unverified,
+        values: &[],
+        read_only: true,
+    }
 }
 
 pub const FEATURES: &[Feature] = &[
     feature("brightness", 0x10, "Brightness", Status::Verified, &[]),
     feature("contrast", 0x12, "Contrast", Status::Standard, &[]),
     feature("sharpness", 0x87, "Sharpness", Status::Standard, &[]),
-    feature("red-gain", 0x16, "White balance: red", Status::Standard, &[]),
-    feature("green-gain", 0x18, "White balance: green", Status::Standard, &[]),
-    feature("blue-gain", 0x1A, "White balance: blue", Status::Standard, &[]),
-    feature("picture-mode", 0x2D, "Picture mode (PC mode values)", Status::ReadVerified, PICTURE_MODES),
-    feature("black-equalizer", 0x2F, "Black Equalizer", Status::Verified, &[]),
-    feature("color-tone", 0x14, "Color tone", Status::Verified, COLOR_TONES),
-    feature("eye-saver", 0x0A, "Eye Saver Mode", Status::Verified, EYE_SAVER),
+    feature(
+        "red-gain",
+        0x16,
+        "White balance: red",
+        Status::Standard,
+        &[],
+    ),
+    feature(
+        "green-gain",
+        0x18,
+        "White balance: green",
+        Status::Standard,
+        &[],
+    ),
+    feature(
+        "blue-gain",
+        0x1A,
+        "White balance: blue",
+        Status::Standard,
+        &[],
+    ),
+    feature(
+        "picture-mode",
+        0x2D,
+        "Picture mode (PC mode values)",
+        Status::ReadVerified,
+        PICTURE_MODES,
+    ),
+    feature(
+        "black-equalizer",
+        0x2F,
+        "Black Equalizer",
+        Status::Verified,
+        &[],
+    ),
+    feature(
+        "color-tone",
+        0x14,
+        "Color tone",
+        Status::Verified,
+        COLOR_TONES,
+    ),
+    feature(
+        "eye-saver",
+        0x0A,
+        "Eye Saver Mode",
+        Status::Verified,
+        EYE_SAVER,
+    ),
     feature("input", 0x60, "Input source", Status::Standard, INPUTS),
     feature("volume", 0x62, "Volume", Status::Standard, &[]),
     read_only("mute", 0x8D, "Audio mute"),
-    feature("language", 0xCC, "OSD language", Status::Standard, LANGUAGES),
+    feature(
+        "language",
+        0xCC,
+        "OSD language",
+        Status::Standard,
+        LANGUAGES,
+    ),
     // F2 packs status (low nibble: 0 off, 1 on, D disabled) and type (high nibble 1 = FreeSync).
     read_only("adaptive-sync", 0xF2, "Adaptive-Sync / FreeSync"),
-    feature("aim-point", 0xED, "Virtual Aim Point", Status::Verified, AIM_POINT),
+    feature(
+        "aim-point",
+        0xED,
+        "Virtual Aim Point",
+        Status::Verified,
+        AIM_POINT,
+    ),
     // F8 bit 0 = lighting, bits 1-2 = CoreSync; only the lighting bit is written.
-    feature("lighting", 0xF8, "Infinity Core Lighting", Status::Verified, OFF_ON),
-    feature("lighting-effect", 0xF9, "Lighting effect", Status::Verified, LIGHTING_EFFECTS),
+    feature(
+        "lighting",
+        0xF8,
+        "Infinity Core Lighting",
+        Status::Verified,
+        OFF_ON,
+    ),
+    feature(
+        "lighting-effect",
+        0xF9,
+        "Lighting effect",
+        Status::Verified,
+        LIGHTING_EFFECTS,
+    ),
     // Colour index: writes work, but SDM's colour names did not match what was seen (7 "blue" looked whitish).
-    feature("lighting-color", 0xFA, "Lighting color", Status::Verified, &[]),
+    feature(
+        "lighting-color",
+        0xFA,
+        "Lighting color",
+        Status::Verified,
+        &[],
+    ),
     read_only("pip", 0xE2, "PIP/PBP status"),
     read_only("pip-source", 0xE3, "PIP/PBP sources"),
-    feature("pip-sound", 0xE8, "PIP/PBP sound source", Status::Unverified, PIP_SOUND),
+    feature(
+        "pip-sound",
+        0xE8,
+        "PIP/PBP sound source",
+        Status::Unverified,
+        PIP_SOUND,
+    ),
     feature("pc-av-mode", 0xE4, "PC/AV mode", Status::Unverified, PC_AV),
 ];
 
@@ -233,8 +344,16 @@ pub const FEATURES: &[Feature] = &[
 /// lighting and effect decide whether a colour applies (verified).
 pub fn dependents(name: &str) -> &'static [&'static str] {
     const PICTURE: &[&str] = &[
-        "picture-mode", "brightness", "contrast", "sharpness", "color-tone", "red-gain", "green-gain", "blue-gain",
-        "black-equalizer", "eye-saver",
+        "picture-mode",
+        "brightness",
+        "contrast",
+        "sharpness",
+        "color-tone",
+        "red-gain",
+        "green-gain",
+        "blue-gain",
+        "black-equalizer",
+        "eye-saver",
     ];
     match name {
         "picture-mode" | "eye-saver" | "pc-av-mode" => PICTURE,
@@ -300,12 +419,31 @@ mod tests {
     #[test]
     fn decodes_packed_readings() {
         // Readings from the real G60SD (fw 1006.0).
-        assert_eq!(decode_adaptive_sync(0x10), AdaptiveSync { state: SyncState::Off, freesync: true });
-        assert_eq!(decode_adaptive_sync(0x00), AdaptiveSync { state: SyncState::Off, freesync: false });
+        assert_eq!(
+            decode_adaptive_sync(0x10),
+            AdaptiveSync {
+                state: SyncState::Off,
+                freesync: true
+            }
+        );
+        assert_eq!(
+            decode_adaptive_sync(0x00),
+            AdaptiveSync {
+                state: SyncState::Off,
+                freesync: false
+            }
+        );
         assert_eq!(decode_adaptive_sync(0x11).state, SyncState::On);
         assert_eq!(decode_adaptive_sync(0x0D).state, SyncState::Disabled);
         let pip = decode_pip_status(0x150E);
-        assert_eq!(pip, PipStatus { on: false, pip_supported: true, pbp_supported: false });
+        assert_eq!(
+            pip,
+            PipStatus {
+                on: false,
+                pip_supported: true,
+                pbp_supported: false
+            }
+        );
         assert_eq!(source_name(0x00).as_deref(), Some("HDMI 1"));
         assert_eq!(source_name(0x11).as_deref(), Some("DP 2"));
         assert_eq!(source_name(0x70), None);

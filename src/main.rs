@@ -79,7 +79,11 @@ fn run(cli: Cli) -> Result<(), Error> {
         }
         Command::Info => info(&mut *open(cli.bus)?.monitor),
         Command::Get { features } => get(&mut *open(cli.bus)?.monitor, &features),
-        Command::Set { feature, value, unverified } => set(&mut *open(cli.bus)?.monitor, &feature, &value, unverified),
+        Command::Set {
+            feature,
+            value,
+            unverified,
+        } => set(&mut *open(cli.bus)?.monitor, &feature, &value, unverified),
         Command::Sdm { state } => sdm(&mut *open(cli.bus)?.monitor, state == "on"),
         Command::Raw(raw) => raw_cmd(&mut *open(cli.bus)?.monitor, raw),
     }
@@ -113,7 +117,13 @@ fn list() -> Result<(), Error> {
 fn print_features() {
     println!("{:<16} {:<5} {:<14} DESCRIPTION", "NAME", "VCP", "STATUS");
     for f in FEATURES {
-        println!("{:<16} {:#04x}  {:<14} {}", f.name, f.code, f.status.as_str(), f.label);
+        println!(
+            "{:<16} {:#04x}  {:<14} {}",
+            f.name,
+            f.code,
+            f.status.as_str(),
+            f.label
+        );
         if !f.values.is_empty() {
             let names: Vec<String> = f.values.iter().map(|(v, n)| format!("{n}={v}")).collect();
             println!("{:<37}values: {}", "", names.join(", "));
@@ -133,7 +143,8 @@ fn info(m: &mut dyn Vcp) -> Result<(), Error> {
 }
 
 fn feature(name: &str) -> Result<&'static Feature, Error> {
-    features::find(name).ok_or_else(|| Error::Other(format!("unknown feature '{name}' (see `features`)")))
+    features::find(name)
+        .ok_or_else(|| Error::Other(format!("unknown feature '{name}' (see `features`)")))
 }
 
 fn describe(f: &Feature, current: u16) -> String {
@@ -154,7 +165,13 @@ fn get(m: &mut dyn Vcp, names: &[String]) -> Result<(), Error> {
     };
     for f in list {
         match m.get_vcp(f.code) {
-            Ok(v) => println!("{:<16} {:<18} max {:<5} [{}]", f.name, describe(f, v.current), v.max, f.status.as_str()),
+            Ok(v) => println!(
+                "{:<16} {:<18} max {:<5} [{}]",
+                f.name,
+                describe(f, v.current),
+                v.max,
+                f.status.as_str()
+            ),
             Err(e) => println!("{:<16} {e}", f.name),
         }
     }
@@ -167,21 +184,30 @@ fn set(m: &mut dyn Vcp, name: &str, value: &str, unverified: bool) -> Result<(),
         .parse_value(value)
         .ok_or_else(|| Error::Other(format!("invalid value '{value}' for {}", f.name)))?;
     let c = actions::write(m, f, target, unverified)?;
-    println!("{}: {} -> {}", f.name, describe(f, c.before), describe(f, c.after));
+    println!(
+        "{}: {} -> {}",
+        f.name,
+        describe(f, c.before),
+        describe(f, c.after)
+    );
     Ok(())
 }
 
 fn sdm(m: &mut dyn Vcp, on: bool) -> Result<(), Error> {
     let target = if on { SDM_ENABLE } else { SDM_DISABLE };
     let (eb, caps) = actions::set_sdm(m, on)?;
-    println!("EB = {eb:#04x} ({})", if eb == target { "ok" } else { "unexpected" });
+    println!(
+        "EB = {eb:#04x} ({})",
+        if eb == target { "ok" } else { "unexpected" }
+    );
     println!("profile: {:?}", caps.profile());
     Ok(())
 }
 
 fn code_arg(s: &str) -> Result<u8, Error> {
     let s = s.trim_start_matches("0x").trim_start_matches("0X");
-    u8::from_str_radix(s, 16).map_err(|_| Error::Other(format!("invalid VCP code '{s}' (hex, e.g. 2f)")))
+    u8::from_str_radix(s, 16)
+        .map_err(|_| Error::Other(format!("invalid VCP code '{s}' (hex, e.g. 2f)")))
 }
 
 fn raw_cmd(m: &mut dyn Vcp, raw: Raw) -> Result<(), Error> {
@@ -196,9 +222,13 @@ fn raw_cmd(m: &mut dyn Vcp, raw: Raw) -> Result<(), Error> {
         }
         Raw::Set { code, value } => {
             let code = code_arg(&code)?;
-            let value = parse_number(&value).ok_or_else(|| Error::Other(format!("invalid value '{value}'")))?;
+            let value = parse_number(&value)
+                .ok_or_else(|| Error::Other(format!("invalid value '{value}'")))?;
             m.set_vcp(code, value)?;
-            println!("VCP {code:02X}: wrote {value}, reads back {}", actions::read_back(m, code)?);
+            println!(
+                "VCP {code:02X}: wrote {value}, reads back {}",
+                actions::read_back(m, code)?
+            );
         }
         Raw::Caps => println!("{}", m.capabilities()?),
     }

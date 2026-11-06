@@ -48,10 +48,14 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.button_padding = egui::vec2(12.0, 6.0);
         s.spacing.slider_width = 280.0;
         s.spacing.interact_size.y = 26.0;
-        s.text_styles.insert(TextStyle::Heading, FontId::proportional(22.0));
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(14.5));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(14.5));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(12.0));
+        s.text_styles
+            .insert(TextStyle::Heading, FontId::proportional(22.0));
+        s.text_styles
+            .insert(TextStyle::Body, FontId::proportional(14.5));
+        s.text_styles
+            .insert(TextStyle::Button, FontId::proportional(14.5));
+        s.text_styles
+            .insert(TextStyle::Small, FontId::proportional(12.0));
     });
     install_fallback_fonts(ctx);
 }
@@ -73,8 +77,14 @@ fn install_fallback_fonts(ctx: &egui::Context) {
                 "symbols-fallback",
                 FontData::from_owned(bytes),
                 vec![
-                    InsertFontFamily { family: FontFamily::Proportional, priority: FontPriority::Lowest },
-                    InsertFontFamily { family: FontFamily::Monospace, priority: FontPriority::Lowest },
+                    InsertFontFamily {
+                        family: FontFamily::Proportional,
+                        priority: FontPriority::Lowest,
+                    },
+                    InsertFontFamily {
+                        family: FontFamily::Monospace,
+                        priority: FontPriority::Lowest,
+                    },
                 ],
             ));
             return;
@@ -92,7 +102,12 @@ pub fn card(ui: &mut egui::Ui, title: &str, hint: Option<&str>, add: impl FnOnce
         .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(width);
-            ui.label(RichText::new(title).strong().size(15.5).color(Color32::WHITE));
+            ui.label(
+                RichText::new(title)
+                    .strong()
+                    .size(15.5)
+                    .color(Color32::WHITE),
+            );
             if let Some(hint) = hint {
                 ui.label(dim(hint));
             }
@@ -106,10 +121,14 @@ pub fn card(ui: &mut egui::Ui, title: &str, hint: Option<&str>, add: impl FnOnce
 pub fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         let size = egui::vec2(LABEL_WIDTH, ui.spacing().interact_size.y);
-        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.set_min_size(size);
-            ui.label(RichText::new(label).color(TEXT_DIM));
-        });
+        ui.allocate_ui_with_layout(
+            size,
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_size(size);
+                ui.label(RichText::new(label).color(TEXT_DIM));
+            },
+        );
         add(ui);
     });
 }
@@ -140,10 +159,19 @@ pub fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
         let radius = 0.5 * rect.height();
         let fill = if *on { ACCENT } else { CONTROL };
-        let fill = if ui.is_enabled() { fill } else { fill.gamma_multiply(0.5) };
-        ui.painter().rect(rect, radius, fill, Stroke::NONE, egui::StrokeKind::Inside);
+        let fill = if ui.is_enabled() {
+            fill
+        } else {
+            fill.gamma_multiply(0.5)
+        };
+        ui.painter()
+            .rect(rect, radius, fill, Stroke::NONE, egui::StrokeKind::Inside);
         let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
-        ui.painter().circle_filled(egui::pos2(x, rect.center().y), 0.75 * radius, Color32::WHITE);
+        ui.painter().circle_filled(
+            egui::pos2(x, rect.center().y),
+            0.75 * radius,
+            Color32::WHITE,
+        );
     }
     response
 }

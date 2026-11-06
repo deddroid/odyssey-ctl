@@ -46,12 +46,21 @@ fn native_options() -> eframe::NativeOptions {
     if let Some(icon) = desktop::window_icon() {
         viewport = viewport.with_icon(icon);
     }
-    eframe::NativeOptions { viewport, ..Default::default() }
+    eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    }
 }
 
 /// Applies a preset chosen from the tray while no window is open.
 fn apply_preset_headless(bus: Option<u32>, name: &str) {
-    let Some(preset) = presets::Presets::load().list.into_iter().find(|p| p.name == name) else { return };
+    let Some(preset) = presets::Presets::load()
+        .list
+        .into_iter()
+        .find(|p| p.name == name)
+    else {
+        return;
+    };
     match actions::open(bus) {
         Ok(mut opened) => {
             let allow = Settings::load().allow_unverified;
@@ -77,7 +86,8 @@ fn main() -> eframe::Result {
     if screenshots.is_none() && !desktop::claim_single_instance(tx.clone()) {
         return Ok(()); // the running instance shows its window
     }
-    let tray = screenshots.is_none() && (settings.close_to_tray || settings.start_hidden || args.hidden);
+    let tray =
+        screenshots.is_none() && (settings.close_to_tray || settings.start_hidden || args.hidden);
     if tray {
         desktop::spawn_tray(
             tx.clone(),

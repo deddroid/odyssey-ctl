@@ -58,7 +58,10 @@ impl Timing {
     /// (for monitors that need more time, or for measuring how little this one needs).
     pub fn from_env() -> Self {
         let ms = |name: &str, default: Duration| {
-            std::env::var(name).ok().and_then(|v| v.parse().ok()).map_or(default, Duration::from_millis)
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .map_or(default, Duration::from_millis)
         };
         let base = Timing::default();
         Timing {
@@ -78,7 +81,12 @@ pub struct DdcDevice<B: Bus> {
 
 impl<B: Bus> DdcDevice<B> {
     pub fn new(bus: B) -> Self {
-        DdcDevice { bus, timing: Timing::from_env(), debug: crate::debug_enabled(), last: None }
+        DdcDevice {
+            bus,
+            timing: Timing::from_env(),
+            debug: crate::debug_enabled(),
+            last: None,
+        }
     }
 
     pub fn with_timing(mut self, timing: Timing) -> Self {
@@ -137,7 +145,10 @@ impl<B: Bus> DdcDevice<B> {
 }
 
 fn is_transient(e: &Error) -> bool {
-    !matches!(e, Error::Reply(ReplyError::Unsupported(_)) | Error::Other(_))
+    !matches!(
+        e,
+        Error::Reply(ReplyError::Unsupported(_)) | Error::Other(_)
+    )
 }
 
 impl<B: Bus> Vcp for DdcDevice<B> {
@@ -175,7 +186,11 @@ impl<B: Bus> Vcp for DdcDevice<B> {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -197,7 +212,10 @@ mod tests {
             Ok(())
         }
         fn read(&mut self, buf: &mut [u8]) -> io::Result<()> {
-            let r = self.replies.pop_front().ok_or_else(|| io::Error::other("no reply"))?;
+            let r = self
+                .replies
+                .pop_front()
+                .ok_or_else(|| io::Error::other("no reply"))?;
             buf.fill(0);
             buf[..r.len()].copy_from_slice(&r);
             Ok(())
@@ -205,9 +223,17 @@ mod tests {
     }
 
     fn device(replies: Vec<Vec<u8>>) -> DdcDevice<FakeBus> {
-        let bus = FakeBus { replies: replies.into(), ..Default::default() };
+        let bus = FakeBus {
+            replies: replies.into(),
+            ..Default::default()
+        };
         let zero = Duration::ZERO;
-        DdcDevice::new(bus).with_timing(Timing { reply: zero, gap: zero, retry: zero, attempts: 3 })
+        DdcDevice::new(bus).with_timing(Timing {
+            reply: zero,
+            gap: zero,
+            retry: zero,
+            attempts: 3,
+        })
     }
 
     fn frame(payload: &[u8]) -> Vec<u8> {
@@ -219,7 +245,9 @@ mod tests {
 
     #[test]
     fn get_retries_after_bad_checksum_and_null() {
-        let good = vec![0x6E, 0x88, 0x02, 0x00, 0x2F, 0x00, 0x00, 0x0A, 0x00, 0x06, 0x97];
+        let good = vec![
+            0x6E, 0x88, 0x02, 0x00, 0x2F, 0x00, 0x00, 0x0A, 0x00, 0x06, 0x97,
+        ];
         let mut bad = good.clone();
         bad[10] ^= 1;
         let mut d = device(vec![bad, vec![0x6E, 0x80, 0xBE], good]);
@@ -232,7 +260,10 @@ mod tests {
     #[test]
     fn unsupported_is_not_retried() {
         let mut d = device(vec![frame(&[0x02, 0x01, 0xE7, 0, 0, 0, 0, 0])]);
-        assert!(matches!(d.get_vcp(0xE7), Err(Error::Reply(ReplyError::Unsupported(0xE7)))));
+        assert!(matches!(
+            d.get_vcp(0xE7),
+            Err(Error::Reply(ReplyError::Unsupported(0xE7)))
+        ));
         assert_eq!(d.bus.written.len(), 1);
     }
 
@@ -247,7 +278,10 @@ mod tests {
     fn set_sends_one_packet() {
         let mut d = device(vec![]);
         d.set_vcp(0x2F, 6).unwrap();
-        assert_eq!(d.bus.written, [vec![0x51, 0x84, 0x03, 0x2F, 0x00, 0x06, 0x91]]);
+        assert_eq!(
+            d.bus.written,
+            [vec![0x51, 0x84, 0x03, 0x2F, 0x00, 0x06, 0x91]]
+        );
     }
 
     #[test]

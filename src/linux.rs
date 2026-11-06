@@ -19,7 +19,10 @@ pub struct I2cBus {
 
 impl I2cBus {
     pub fn open(bus: u32, addr: u16) -> io::Result<Self> {
-        let file = OpenOptions::new().read(true).write(true).open(format!("/dev/i2c-{bus}"))?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(format!("/dev/i2c-{bus}"))?;
         // SAFETY: I2C_SLAVE takes the 7-bit slave address as an integer argument.
         let r = unsafe { libc::ioctl(file.as_raw_fd(), I2C_SLAVE as _, addr as libc::c_ulong) };
         if r < 0 {
@@ -55,7 +58,9 @@ pub struct Display {
 /// Finds monitors by reading the EDID on every i2c bus that belongs to a graphics card.
 pub fn discover() -> Vec<Display> {
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir("/sys/bus/i2c/devices") else { return out };
+    let Ok(entries) = fs::read_dir("/sys/bus/i2c/devices") else {
+        return out;
+    };
     let mut buses: Vec<u32> = entries
         .flatten()
         .filter_map(|e| e.file_name().to_str()?.strip_prefix("i2c-")?.parse().ok())
@@ -68,11 +73,19 @@ pub fn discover() -> Vec<Display> {
             continue;
         }
         let Some(raw) = read_edid(bus) else { continue };
-        let Some(edid) = Edid::parse(&raw) else { continue };
+        let Some(edid) = Edid::parse(&raw) else {
+            continue;
+        };
         out.push(Display {
             bus,
-            adapter: fs::read_to_string(format!("{sys}/name")).unwrap_or_default().trim().to_string(),
-            connector: connectors.iter().find(|(_, e)| e[..] == raw[..]).map(|(n, _)| n.clone()),
+            adapter: fs::read_to_string(format!("{sys}/name"))
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            connector: connectors
+                .iter()
+                .find(|(_, e)| e[..] == raw[..])
+                .map(|(n, _)| n.clone()),
             edid,
         });
     }
@@ -82,8 +95,12 @@ pub fn discover() -> Vec<Display> {
 /// True when the adapter's parent PCI device is a display controller (class 0x03xxxx),
 /// which excludes motherboard SMBus controllers.
 fn is_display_adapter(sys: &Path) -> bool {
-    let Ok(real) = fs::canonicalize(sys) else { return false };
-    let Some(parent) = real.parent() else { return false };
+    let Ok(real) = fs::canonicalize(sys) else {
+        return false;
+    };
+    let Some(parent) = real.parent() else {
+        return false;
+    };
     fs::read_to_string(parent.join("class")).is_ok_and(|c| c.trim().starts_with("0x03"))
 }
 
@@ -104,7 +121,9 @@ fn read_edid(bus: u32) -> Option<Vec<u8>> {
 
 /// First 128 EDID bytes of every connected DRM connector.
 fn drm_edids() -> Vec<(String, Vec<u8>)> {
-    let Ok(entries) = fs::read_dir("/sys/class/drm") else { return Vec::new() };
+    let Ok(entries) = fs::read_dir("/sys/class/drm") else {
+        return Vec::new();
+    };
     entries
         .flatten()
         .filter_map(|e| {

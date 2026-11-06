@@ -22,7 +22,10 @@ pub struct Opened {
 pub fn open(bus: Option<u32>) -> Result<Opened, Error> {
     if std::env::var("ODYSSEY_CTL_DEMO").is_ok_and(|v| v == "1") {
         let monitor: Monitor = Box::<crate::demo::DemoDevice>::default();
-        return Ok(Opened { monitor, name: Some("Odyssey G60SD (demo)".into()) });
+        return Ok(Opened {
+            monitor,
+            name: Some("Odyssey G60SD (demo)".into()),
+        });
     }
     open_platform(bus)
 }
@@ -37,10 +40,17 @@ fn open_platform(bus: Option<u32>) -> Result<Opened, Error> {
     let bus = match (bus, &display) {
         (Some(b), _) => b,
         (None, Some(d)) => d.bus,
-        (None, None) => return Err(Error::Other("no Samsung monitor found (try `list` or --bus)".into())),
+        (None, None) => {
+            return Err(Error::Other(
+                "no Samsung monitor found (try `list` or --bus)".into(),
+            ));
+        }
     };
     let monitor: Monitor = Box::new(crate::linux::open(bus)?);
-    Ok(Opened { monitor, name: display.and_then(|d| d.edid.name) })
+    Ok(Opened {
+        monitor,
+        name: display.and_then(|d| d.edid.name),
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -61,7 +71,10 @@ pub fn read(m: &mut dyn Vcp, features: &[&'static Feature]) -> Result<Vec<Readin
         .iter()
         .map(|&feature| match m.get_vcp(feature.code) {
             Err(e @ Error::Io(_)) => Err(e),
-            value => Ok(Reading { feature, value: value.map_err(|e| e.to_string()) }),
+            value => Ok(Reading {
+                feature,
+                value: value.map_err(|e| e.to_string()),
+            }),
         })
         .collect()
 }
@@ -74,7 +87,12 @@ pub struct Change {
 
 /// Writes `target` after checking the verification status and the monitor's maximum,
 /// then reads the value back. Fails when the monitor does not apply the write.
-pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) -> Result<Change, Error> {
+pub fn write(
+    m: &mut dyn Vcp,
+    f: &Feature,
+    target: u16,
+    allow_unverified: bool,
+) -> Result<Change, Error> {
     check_policy(f, allow_unverified)?;
     let before = m.get_vcp(f.code)?;
     write_from(m, f, before, target)
@@ -82,7 +100,10 @@ pub fn write(m: &mut dyn Vcp, f: &Feature, target: u16, allow_unverified: bool) 
 
 fn check_policy(f: &Feature, allow_unverified: bool) -> Result<(), Error> {
     if f.read_only {
-        return Err(Error::Other(format!("'{}' is read-only (its value format is not decoded yet)", f.name)));
+        return Err(Error::Other(format!(
+            "'{}' is read-only (its value format is not decoded yet)",
+            f.name
+        )));
     }
     if !f.status.safe_to_write() && !allow_unverified {
         return Err(Error::Other(format!(
@@ -95,7 +116,12 @@ fn check_policy(f: &Feature, allow_unverified: bool) -> Result<(), Error> {
 }
 
 /// Like [`write`], for callers that have just read `before` themselves (saves one transaction).
-pub fn write_from(m: &mut dyn Vcp, f: &Feature, before: VcpValue, target: u16) -> Result<Change, Error> {
+pub fn write_from(
+    m: &mut dyn Vcp,
+    f: &Feature,
+    before: VcpValue,
+    target: u16,
+) -> Result<Change, Error> {
     if is_disabled(before.current, before.max) {
         return Err(Error::Other(format!(
             "'{}' is disabled in the monitor's current state (e.g. by Eye Saver, PIP or the picture mode)",
@@ -103,7 +129,10 @@ pub fn write_from(m: &mut dyn Vcp, f: &Feature, before: VcpValue, target: u16) -
         )));
     }
     if target > before.max {
-        return Err(Error::Other(format!("{target} is above the maximum {} of {}", before.max, f.name)));
+        return Err(Error::Other(format!(
+            "{target} is above the maximum {} of {}",
+            before.max, f.name
+        )));
     }
     m.set_vcp(f.code, target)?;
     let after = read_back_after(m, f.code, settle_time(f))?;
@@ -113,7 +142,10 @@ pub fn write_from(m: &mut dyn Vcp, f: &Feature, before: VcpValue, target: u16) -
             f.name
         )));
     }
-    Ok(Change { before: before.current, after })
+    Ok(Change {
+        before: before.current,
+        after,
+    })
 }
 
 /// How long the monitor needs to apply a write before it reads back the new value. Samsung Display
@@ -150,7 +182,13 @@ mod tests {
     fn write_checks_policy_range_and_readback() {
         let mut d = DemoDevice::new();
         let be = find("black-equalizer").unwrap();
-        assert_eq!(write(&mut d, be, 4, false).unwrap(), Change { before: 6, after: 4 });
+        assert_eq!(
+            write(&mut d, be, 4, false).unwrap(),
+            Change {
+                before: 6,
+                after: 4
+            }
+        );
         assert!(write(&mut d, be, 11, false).is_err());
         assert!(write(&mut d, find("pip-sound").unwrap(), 1, false).is_err());
         assert!(write(&mut d, find("pip-sound").unwrap(), 1, true).is_ok());
@@ -168,7 +206,11 @@ mod tests {
     #[test]
     fn read_returns_one_reading_per_feature() {
         let mut d = DemoDevice::new();
-        let r = read(&mut d, &[find("brightness").unwrap(), find("picture-mode").unwrap()]).unwrap();
+        let r = read(
+            &mut d,
+            &[find("brightness").unwrap(), find("picture-mode").unwrap()],
+        )
+        .unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].value.as_ref().unwrap().current, 50);
         assert_eq!(r[1].value.as_ref().unwrap().current, 8);

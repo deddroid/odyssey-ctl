@@ -29,8 +29,15 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 7] =
-        [Page::Presets, Page::Picture, Page::Game, Page::Lighting, Page::Source, Page::Monitor, Page::Settings];
+    const ALL: [Page; 7] = [
+        Page::Presets,
+        Page::Picture,
+        Page::Game,
+        Page::Lighting,
+        Page::Source,
+        Page::Monitor,
+        Page::Settings,
+    ];
 
     fn slug(self) -> &'static str {
         match self {
@@ -112,8 +119,19 @@ impl App {
         }
         let shots = screenshots.map(|dir| {
             let (tx, rx) = mpsc::channel();
-            let steps = Lang::ALL.iter().flat_map(|&l| Page::ALL.map(|p| (l, p))).collect();
-            Screenshots { dir, steps, index: 0, frames: 0, requested: false, tx, rx }
+            let steps = Lang::ALL
+                .iter()
+                .flat_map(|&l| Page::ALL.map(|p| (l, p)))
+                .collect();
+            Screenshots {
+                dir,
+                steps,
+                index: 0,
+                frames: 0,
+                requested: false,
+                tx,
+                rx,
+            }
         });
         let mut app = App {
             shell,
@@ -158,7 +176,10 @@ impl App {
     }
 
     fn request(&mut self, r: Request) {
-        let writes = matches!(r, Request::Write { .. } | Request::Sdm(_) | Request::ApplyPreset { .. });
+        let writes = matches!(
+            r,
+            Request::Write { .. } | Request::Sdm(_) | Request::ApplyPreset { .. }
+        );
         self.in_flight.push_back(writes);
         self.worker.send(r);
     }
@@ -244,7 +265,10 @@ impl App {
                 }
                 Reply::Sdm { eb, caps } => {
                     let model = caps.model.clone().unwrap_or_default();
-                    self.message = Some(Message::Info(format!("EB = {eb:#04x} · {model}"), Instant::now()));
+                    self.message = Some(Message::Info(
+                        format!("EB = {eb:#04x} · {model}"),
+                        Instant::now(),
+                    ));
                     self.caps = Some(caps);
                 }
                 Reply::PresetApplied { name, report } => {
@@ -278,9 +302,20 @@ impl App {
         }
         if let Ok(image) = s.rx.try_recv() {
             let (lang, page) = s.steps[s.index];
-            let path = s.dir.join(format!("{:02}_{}_{}.png", s.index, lang.code(), page.slug()));
+            let path = s.dir.join(format!(
+                "{:02}_{}_{}.png",
+                s.index,
+                lang.code(),
+                page.slug()
+            ));
             let [w, h] = image.size;
-            if let Err(e) = image::save_buffer(&path, image.as_raw(), w as u32, h as u32, image::ColorType::Rgba8) {
+            if let Err(e) = image::save_buffer(
+                &path,
+                image.as_raw(),
+                w as u32,
+                h as u32,
+                image::ColorType::Rgba8,
+            ) {
                 eprintln!("{}: {e}", path.display());
             }
             s.index += 1;
@@ -311,21 +346,41 @@ impl App {
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            ui.label(RichText::new("Odyssey Control").strong().size(18.0).color(Color32::WHITE));
+            ui.label(
+                RichText::new("Odyssey Control")
+                    .strong()
+                    .size(18.0)
+                    .color(Color32::WHITE),
+            );
         });
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            ui.label(dim(self.name.clone().unwrap_or_else(|| "Samsung Odyssey".into())));
+            ui.label(dim(self
+                .name
+                .clone()
+                .unwrap_or_else(|| "Samsung Odyssey".into())));
         });
         ui.add_space(14.0);
         for page in Page::ALL {
             let selected = self.page == page;
-            let text = RichText::new(format!("{}   {}", page.icon(), self.t(&format!("nav.{}", page.slug()))))
-                .size(15.0)
-                .color(if selected { Color32::WHITE } else { TEXT_DIM });
+            let text = RichText::new(format!(
+                "{}   {}",
+                page.icon(),
+                self.t(&format!("nav.{}", page.slug()))
+            ))
+            .size(15.0)
+            .color(if selected { Color32::WHITE } else { TEXT_DIM });
             let button = egui::Button::new(text)
-                .fill(if selected { theme::ACCENT_SOFT } else { Color32::TRANSPARENT })
-                .stroke(if selected { Stroke::new(1.0, ACCENT) } else { Stroke::NONE })
+                .fill(if selected {
+                    theme::ACCENT_SOFT
+                } else {
+                    Color32::TRANSPARENT
+                })
+                .stroke(if selected {
+                    Stroke::new(1.0, ACCENT)
+                } else {
+                    Stroke::NONE
+                })
                 .min_size(Vec2::new(ui.available_width(), 36.0));
             if ui.add(button).clicked() {
                 self.page = page;
@@ -419,23 +474,37 @@ impl App {
             }
         }
         if !allowed {
-            ui.label(RichText::new(format!("⚠ {}", self.t("locked"))).small().color(WARN))
-                .on_hover_text(self.t("locked_hint"));
+            ui.label(
+                RichText::new(format!("⚠ {}", self.t("locked")))
+                    .small()
+                    .color(WARN),
+            )
+            .on_hover_text(self.t("locked_hint"));
         }
         if let Some(value) = write {
             let allow_unverified = self.settings.allow_unverified;
-            self.request(Request::Write { feature: f, value, allow_unverified });
+            self.request(Request::Write {
+                feature: f,
+                value,
+                allow_unverified,
+            });
         }
     }
 
     fn editor(&mut self, ui: &mut egui::Ui, f: &'static Feature, v: VcpValue) -> Option<u16> {
         // "Reset position" of the aim point is an action, not a state: not offered yet.
-        let values: Vec<(u16, &str)> =
-            f.values.iter().copied().filter(|&(x, n)| x <= v.max && n != "reset-position").collect();
+        let values: Vec<(u16, &str)> = f
+            .values
+            .iter()
+            .copied()
+            .filter(|&(x, n)| x <= v.max && n != "reset-position")
+            .collect();
         let is_switch = values.len() == 2 && values[0].1 == "off" && values[1].1 == "on";
         if is_switch {
             let mut on = v.current & 1 == 1;
-            return theme::toggle(ui, &mut on).changed().then_some(u16::from(on));
+            return theme::toggle(ui, &mut on)
+                .changed()
+                .then_some(u16::from(on));
         }
         if !values.is_empty() && values.len() <= 10 {
             let mut chosen = None;
@@ -479,14 +548,19 @@ impl App {
     }
 
     fn feature_row(&mut self, ui: &mut egui::Ui, name: &str) {
-        let label = features::find(name).map(|f| self.feature_label(f)).unwrap_or_default();
+        let label = features::find(name)
+            .map(|f| self.feature_label(f))
+            .unwrap_or_default();
         theme::row(ui, &label, |ui| self.control(ui, name));
     }
 
     // ---- pages -------------------------------------------------------------
 
     fn current_values(&self) -> BTreeMap<u8, VcpValue> {
-        self.values.iter().filter_map(|(&c, v)| Some((c, *v.as_ref().ok()?))).collect()
+        self.values
+            .iter()
+            .filter_map(|(&c, v)| Some((c, *v.as_ref().ok()?)))
+            .collect()
     }
 
     fn apply_preset(&mut self, i: usize) {
@@ -494,7 +568,11 @@ impl App {
         let (name, values) = (p.name.clone(), p.values.clone());
         let allow_unverified = self.settings.allow_unverified;
         self.confirm_delete = None;
-        self.request(Request::ApplyPreset { name, values, allow_unverified });
+        self.request(Request::ApplyPreset {
+            name,
+            values,
+            allow_unverified,
+        });
     }
 
     /// Presets chosen from the tray menu while the window is open.
@@ -502,7 +580,15 @@ impl App {
         if self.writing() {
             return; // picked up on a later frame
         }
-        let Some(name) = self.shell.preset_requests.lock().ok().and_then(|mut q| q.pop()) else { return };
+        let Some(name) = self
+            .shell
+            .preset_requests
+            .lock()
+            .ok()
+            .and_then(|mut q| q.pop())
+        else {
+            return;
+        };
         if let Some(i) = self.presets.list.iter().position(|p| p.name == name) {
             self.apply_preset(i);
         }
@@ -518,7 +604,9 @@ impl App {
 
     /// One line describing a preset: its picture mode, if any, and how many settings it holds.
     fn preset_summary(&self, p: &Preset) -> String {
-        let count = self.t("n_settings").replace("{n}", &p.values.len().to_string());
+        let count = self
+            .t("n_settings")
+            .replace("{n}", &p.values.len().to_string());
         let mode = features::find("picture-mode")
             .zip(p.values.get("picture-mode"))
             .map(|(f, &v)| self.value_text(f, v));
@@ -533,15 +621,24 @@ impl App {
         theme::card(ui, &title, Some(&hint), |ui| {
             ui.horizontal(|ui| {
                 let hint = self.t("preset_name");
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).hint_text(hint).desired_width(260.0));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_name)
+                        .hint_text(hint)
+                        .desired_width(260.0),
+                );
                 let name = self.new_name.trim().to_string();
                 let can = !name.is_empty() && !self.values.is_empty() && !self.writing();
-                let save = egui::Button::new(RichText::new(self.t("save")).color(Color32::WHITE)).fill(ACCENT);
+                let save = egui::Button::new(RichText::new(self.t("save")).color(Color32::WHITE))
+                    .fill(ACCENT);
                 if ui.add_enabled(can, save).clicked() {
                     let allow = self.settings.allow_unverified;
-                    let values =
-                        preset_logic::capture(&self.current_values(), |f| f.status.safe_to_write() || allow);
-                    self.presets.put(Preset { name: name.clone(), values });
+                    let values = preset_logic::capture(&self.current_values(), |f| {
+                        f.status.safe_to_write() || allow
+                    });
+                    self.presets.put(Preset {
+                        name: name.clone(),
+                        values,
+                    });
                     self.save_presets();
                     self.new_name.clear();
                     let text = self.t("preset_saved").replace("{name}", &name);
@@ -569,24 +666,40 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&p.name).strong().color(Color32::WHITE));
                             if preset_logic::matches(&p.values, &current) {
-                                ui.label(RichText::new(format!("● {}", self.t("active"))).small().color(OK));
+                                ui.label(
+                                    RichText::new(format!("● {}", self.t("active")))
+                                        .small()
+                                        .color(OK),
+                                );
                             }
                         });
                         ui.label(dim(self.preset_summary(p)));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let confirming = self.confirm_delete == Some(i);
-                        let label = if confirming { self.t("confirm_delete") } else { self.t("delete") };
-                        let text = RichText::new(label).color(if confirming { ERR } else { TEXT_DIM });
+                        let label = if confirming {
+                            self.t("confirm_delete")
+                        } else {
+                            self.t("delete")
+                        };
+                        let text =
+                            RichText::new(label).color(if confirming { ERR } else { TEXT_DIM });
                         if ui.button(text).clicked() {
                             delete = Some(i);
                         }
-                        if ui.add_enabled(!self.writing(), egui::Button::new(self.t("overwrite"))).clicked() {
+                        if ui
+                            .add_enabled(!self.writing(), egui::Button::new(self.t("overwrite")))
+                            .clicked()
+                        {
                             overwrite = Some(i);
                         }
                         let apply_button =
-                            egui::Button::new(RichText::new(self.t("apply")).color(Color32::WHITE)).fill(ACCENT);
-                        if ui.add_enabled(!self.writing() && !self.values.is_empty(), apply_button).clicked() {
+                            egui::Button::new(RichText::new(self.t("apply")).color(Color32::WHITE))
+                                .fill(ACCENT);
+                        if ui
+                            .add_enabled(!self.writing() && !self.values.is_empty(), apply_button)
+                            .clicked()
+                        {
                             apply = Some(i);
                         }
                     });
@@ -597,10 +710,13 @@ impl App {
             }
             if let Some(i) = overwrite {
                 let allow = self.settings.allow_unverified;
-                self.presets.list[i].values = preset_logic::capture(&current, |f| f.status.safe_to_write() || allow);
+                self.presets.list[i].values =
+                    preset_logic::capture(&current, |f| f.status.safe_to_write() || allow);
                 self.confirm_delete = None;
                 self.save_presets();
-                let text = self.t("preset_saved").replace("{name}", &self.presets.list[i].name);
+                let text = self
+                    .t("preset_saved")
+                    .replace("{name}", &self.presets.list[i].name);
                 self.message = Some(Message::Info(text, Instant::now()));
             }
             if let Some(i) = delete {
@@ -617,7 +733,9 @@ impl App {
 
     fn page_picture(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.mode"), self.t("card.mode.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| self.control(ui, "picture-mode"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            self.control(ui, "picture-mode")
+        });
         let title = self.t("card.basic");
         theme::card(ui, &title, None, |ui| {
             for name in ["brightness", "contrast", "sharpness"] {
@@ -631,7 +749,9 @@ impl App {
             }
         });
         let (title, hint) = (self.t("card.comfort"), self.t("card.comfort.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| self.feature_row(ui, "eye-saver"));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            self.feature_row(ui, "eye-saver")
+        });
     }
 
     fn page_game(&mut self, ui: &mut egui::Ui) {
@@ -643,24 +763,30 @@ impl App {
         let (title, hint) = (self.t("card.aim"), self.t("card.aim.hint"));
         theme::card(ui, &title, Some(&hint), |ui| self.control(ui, "aim-point"));
         let (title, hint) = (self.t("card.sync"), self.t("card.sync.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| match self.reading("adaptive-sync") {
-            Some(v) => {
-                let sync = features::decode_adaptive_sync(v.current);
-                let state = match sync.state {
-                    SyncState::Off => self.t("sync.off"),
-                    SyncState::On => self.t("sync.on"),
-                    SyncState::Disabled => self.t("disabled_now"),
-                };
-                let kind = if sync.freesync { "FreeSync Premium Pro" } else { "Adaptive-Sync" };
-                theme::row(ui, &self.t("row.state"), |ui| {
-                    ui.label(state);
-                });
-                theme::row(ui, &self.t("row.type"), |ui| {
-                    ui.label(kind);
-                });
-            }
-            None => {
-                ui.label(dim(self.t("not_supported")));
+        theme::card(ui, &title, Some(&hint), |ui| {
+            match self.reading("adaptive-sync") {
+                Some(v) => {
+                    let sync = features::decode_adaptive_sync(v.current);
+                    let state = match sync.state {
+                        SyncState::Off => self.t("sync.off"),
+                        SyncState::On => self.t("sync.on"),
+                        SyncState::Disabled => self.t("disabled_now"),
+                    };
+                    let kind = if sync.freesync {
+                        "FreeSync Premium Pro"
+                    } else {
+                        "Adaptive-Sync"
+                    };
+                    theme::row(ui, &self.t("row.state"), |ui| {
+                        ui.label(state);
+                    });
+                    theme::row(ui, &self.t("row.type"), |ui| {
+                        ui.label(kind);
+                    });
+                }
+                None => {
+                    ui.label(dim(self.t("not_supported")));
+                }
             }
         });
     }
@@ -668,7 +794,11 @@ impl App {
     fn page_lighting(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.lighting"), self.t("card.lighting.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
-            for (key, name) in [("row.lighting", "lighting"), ("row.effect", "lighting-effect"), ("row.colour", "lighting-color")] {
+            for (key, name) in [
+                ("row.lighting", "lighting"),
+                ("row.effect", "lighting-effect"),
+                ("row.colour", "lighting-color"),
+            ] {
                 let label = self.t(key);
                 theme::row(ui, &label, |ui| self.control(ui, name));
             }
@@ -756,7 +886,9 @@ impl App {
                 });
                 let codes: Vec<String> = caps.vcp.keys().map(|c| format!("{c:02X}")).collect();
                 theme::row(ui, &self.t("row.codes"), |ui| {
-                    ui.add(egui::Label::new(RichText::new(codes.join(" ")).monospace().small()).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(codes.join(" ")).monospace().small()).wrap(),
+                    );
                 });
                 egui::CollapsingHeader::new(self.t("caps_raw")).show(ui, |ui| {
                     ui.add(egui::Label::new(RichText::new(&caps.raw).monospace().small()).wrap());
@@ -766,10 +898,16 @@ impl App {
         let (title, hint) = (self.t("card.sdm"), self.t("card.sdm.hint"));
         theme::card(ui, &title, Some(&hint), |ui| {
             ui.horizontal(|ui| {
-                if ui.add_enabled(!self.writing(), egui::Button::new(self.t("sdm_on"))).clicked() {
+                if ui
+                    .add_enabled(!self.writing(), egui::Button::new(self.t("sdm_on")))
+                    .clicked()
+                {
                     self.request(Request::Sdm(true));
                 }
-                if ui.add_enabled(!self.writing(), egui::Button::new(self.t("sdm_off"))).clicked() {
+                if ui
+                    .add_enabled(!self.writing(), egui::Button::new(self.t("sdm_off")))
+                    .clicked()
+                {
                     self.request(Request::Sdm(false));
                 }
             });
@@ -785,7 +923,13 @@ impl App {
                     .selected_text(self.settings.language.native_name())
                     .show_ui(ui, |ui| {
                         for lang in Lang::ALL {
-                            changed |= ui.selectable_value(&mut self.settings.language, lang, lang.native_name()).changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.settings.language,
+                                    lang,
+                                    lang.native_name(),
+                                )
+                                .changed();
                         }
                     });
             });
@@ -841,19 +985,25 @@ impl eframe::App for App {
         egui::Panel::left("nav")
             .resizable(false)
             .exact_size(210.0)
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(egui::Margin::same(10)))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin::same(10)),
+            )
             .show(ui, |ui| self.sidebar(ui));
         egui::CentralPanel::default_margins().show(ui, |ui| {
             self.top_bar(ui);
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| match self.page {
-                Page::Presets => self.page_presets(ui),
-                Page::Picture => self.page_picture(ui),
-                Page::Game => self.page_game(ui),
-                Page::Lighting => self.page_lighting(ui),
-                Page::Source => self.page_source(ui),
-                Page::Monitor => self.page_monitor(ui),
-                Page::Settings => self.page_settings(ui),
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| match self.page {
+                    Page::Presets => self.page_presets(ui),
+                    Page::Picture => self.page_picture(ui),
+                    Page::Game => self.page_game(ui),
+                    Page::Lighting => self.page_lighting(ui),
+                    Page::Source => self.page_source(ui),
+                    Page::Monitor => self.page_monitor(ui),
+                    Page::Settings => self.page_settings(ui),
+                });
         });
     }
 }

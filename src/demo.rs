@@ -45,7 +45,9 @@ pub struct DemoDevice {
 
 impl DemoDevice {
     pub fn new() -> Self {
-        DemoDevice { values: SNAPSHOT.iter().map(|&(c, m, v)| (c, (m, v))).collect() }
+        DemoDevice {
+            values: SNAPSHOT.iter().map(|&(c, m, v)| (c, (m, v))).collect(),
+        }
     }
 }
 
@@ -57,19 +59,35 @@ impl Default for DemoDevice {
 
 impl Vcp for DemoDevice {
     fn get_vcp(&mut self, code: u8) -> Result<VcpValue, Error> {
-        let &(max, current) = self.values.get(&code).ok_or(ReplyError::Unsupported(code))?;
-        Ok(VcpValue { code, kind: 0, max, current })
+        let &(max, current) = self
+            .values
+            .get(&code)
+            .ok_or(ReplyError::Unsupported(code))?;
+        Ok(VcpValue {
+            code,
+            kind: 0,
+            max,
+            current,
+        })
     }
 
     fn set_vcp(&mut self, code: u8, value: u16) -> Result<(), Error> {
-        let entry = self.values.get_mut(&code).ok_or(ReplyError::Unsupported(code))?;
+        let entry = self
+            .values
+            .get_mut(&code)
+            .ok_or(ReplyError::Unsupported(code))?;
         entry.1 = value;
         Ok(())
     }
 
     fn capabilities(&mut self) -> Result<String, Error> {
         let eb = self.values[&VCP_SDM_CONTROL].1;
-        Ok(if eb == SDM_ENABLE { LEMON_CAPS } else { SEC_CAPS }.to_string())
+        Ok(if eb == SDM_ENABLE {
+            LEMON_CAPS
+        } else {
+            SEC_CAPS
+        }
+        .to_string())
     }
 }
 
@@ -82,16 +100,28 @@ mod tests {
     #[test]
     fn sdm_switches_profile() {
         let mut d = DemoDevice::new();
-        assert_eq!(Capabilities::parse(&d.capabilities().unwrap()).profile(), Profile::Sec);
+        assert_eq!(
+            Capabilities::parse(&d.capabilities().unwrap()).profile(),
+            Profile::Sec
+        );
         d.set_vcp(VCP_SDM_CONTROL, SDM_ENABLE).unwrap();
-        assert!(matches!(Capabilities::parse(&d.capabilities().unwrap()).profile(), Profile::Lemon(_)));
+        assert!(matches!(
+            Capabilities::parse(&d.capabilities().unwrap()).profile(),
+            Profile::Lemon(_)
+        ));
         d.set_vcp(VCP_SDM_CONTROL, SDM_DISABLE).unwrap();
-        assert_eq!(Capabilities::parse(&d.capabilities().unwrap()).profile(), Profile::Sec);
+        assert_eq!(
+            Capabilities::parse(&d.capabilities().unwrap()).profile(),
+            Profile::Sec
+        );
     }
 
     #[test]
     fn unknown_code_is_unsupported() {
         let mut d = DemoDevice::new();
-        assert!(matches!(d.get_vcp(0x01), Err(Error::Reply(ReplyError::Unsupported(1)))));
+        assert!(matches!(
+            d.get_vcp(0x01),
+            Err(Error::Reply(ReplyError::Unsupported(1)))
+        ));
     }
 }

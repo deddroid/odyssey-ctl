@@ -32,7 +32,11 @@ impl Presets {
 
     /// Adds a preset, or replaces the one with the same name (case-insensitive).
     pub fn put(&mut self, preset: Preset) {
-        match self.list.iter_mut().find(|p| p.name.eq_ignore_ascii_case(&preset.name)) {
+        match self
+            .list
+            .iter_mut()
+            .find(|p| p.name.eq_ignore_ascii_case(&preset.name))
+        {
             Some(existing) => *existing = preset,
             None => self.list.push(preset),
         }
@@ -46,12 +50,25 @@ mod tests {
     #[test]
     fn toml_round_trip_and_put() {
         let mut p = Presets::default();
-        let values: Values = [("brightness".to_string(), 30), ("picture-mode".to_string(), 6)].into();
-        p.put(Preset { name: "FPS".into(), values: values.clone() });
-        p.put(Preset { name: "fps".into(), values: [("brightness".to_string(), 40)].into() });
+        let values: Values = [
+            ("brightness".to_string(), 30),
+            ("picture-mode".to_string(), 6),
+        ]
+        .into();
+        p.put(Preset {
+            name: "FPS".into(),
+            values: values.clone(),
+        });
+        p.put(Preset {
+            name: "fps".into(),
+            values: [("brightness".to_string(), 40)].into(),
+        });
         assert_eq!(p.list.len(), 1);
         assert_eq!(p.list[0].values["brightness"], 40);
-        p.put(Preset { name: "Notte".into(), values });
+        p.put(Preset {
+            name: "Notte".into(),
+            values,
+        });
         let text = toml::to_string(&p).unwrap();
         assert!(text.contains("[[preset]]") && text.contains("name = \"Notte\""));
         assert_eq!(toml::from_str::<Presets>(&text).unwrap(), p);
