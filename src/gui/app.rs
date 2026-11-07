@@ -17,7 +17,7 @@ use odyssey_ctl::presets as preset_logic;
 use crate::i18n::{Lang, tr};
 use crate::presets::{AimSpot, Preset, Presets};
 use crate::settings::Settings;
-use crate::theme::{self, ACCENT, ERR, OK, TEXT_DIM, WARN, dim};
+use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,10 +74,10 @@ enum Message {
     Error(String),
 }
 
-/// `ODYSSEY_CTL_SCREENSHOTS=<dir>`: capture every page in every language, then quit.
+/// `ODYSSEY_CTL_SCREENSHOTS=<dir>`: capture every page in every language and theme, then quit.
 struct Screenshots {
     dir: PathBuf,
-    steps: Vec<(Lang, Page)>,
+    steps: Vec<(egui::Theme, Lang, Page)>,
     index: usize,
     frames: u32,
     requested: bool,
@@ -132,9 +132,10 @@ impl App {
         }
         let shots = screenshots.map(|dir| {
             let (tx, rx) = mpsc::channel();
-            let steps = Lang::ALL
-                .iter()
-                .flat_map(|&l| Page::ALL.map(|p| (l, p)))
+            let steps = [egui::Theme::Dark, egui::Theme::Light]
+                .into_iter()
+                .flat_map(|t| Lang::ALL.into_iter().map(move |l| (t, l)))
+                .flat_map(|(t, l)| Page::ALL.map(|p| (t, l, p)))
                 .collect();
             Screenshots {
                 dir,
@@ -194,7 +195,7 @@ impl App {
         ui.label(
             RichText::new(format!("⚠ {}", self.t("locked")))
                 .small()
-                .color(WARN),
+                .color(palette(ui).warn),
         )
         .on_hover_text(self.t("locked_hint"));
     }
@@ -416,13 +417,14 @@ impl App {
             return; // wait for the monitor data
         }
         if let Ok(image) = s.rx.try_recv() {
-            let (lang, page) = s.steps[s.index];
-            let path = s.dir.join(format!(
-                "{:02}_{}_{}.png",
-                s.index,
-                lang.code(),
-                page.slug()
-            ));
+            let (theme, lang, page) = s.steps[s.index];
+            let suffix = match theme {
+                egui::Theme::Dark => "",
+                egui::Theme::Light => "_light",
+            };
+            let path = s
+                .dir
+                .join(format!("{}_{}{suffix}.png", lang.code(), page.slug()));
             let [w, h] = image.size;
             if let Err(e) = image::save_buffer(
                 &path,
@@ -437,10 +439,11 @@ impl App {
             s.frames = 0;
             s.requested = false;
         }
-        let Some(&(lang, page)) = s.steps.get(s.index) else {
+        let Some(&(theme, lang, page)) = s.steps.get(s.index) else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         };
+        ctx.set_theme(theme);
         self.settings.language = lang;
         self.page = page;
         s.frames += 1;
@@ -458,24 +461,21 @@ impl App {
     // ---- frame -------------------------------------------------------------
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(14.0);
+        let p = palette(ui);
+        ui.add_space(12.0);
         ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new("Odyssey Control")
-                    .strong()
-                    .size(18.0)
-                    .color(Color32::WHITE),
-            );
+            ui.add_space(12.0);
+            ui.label(RichText::new("Odyssey Control").font(theme::title_font(21.0)));
         });
         ui.horizontal(|ui| {
-            ui.add_space(6.0);
+            ui.add_space(12.0);
             ui.label(dim(self
                 .name
                 .clone()
                 .unwrap_or_else(|| "Samsung Odyssey".into())));
         });
         ui.add_space(14.0);
+        ui.spacing_mut().item_spacing.y = 2.0;
         for page in Page::ALL {
             let selected = self.page == page;
             let text = RichText::new(format!(
@@ -483,19 +483,14 @@ impl App {
                 page.icon(),
                 self.t(&format!("nav.{}", page.slug()))
             ))
-            .size(15.0)
-            .color(if selected { Color32::WHITE } else { TEXT_DIM });
+            .color(if selected { Color32::WHITE } else { p.text_dim });
             let button = egui::Button::new(text)
                 .fill(if selected {
-                    theme::ACCENT_SOFT
+                    p.accent
                 } else {
                     Color32::TRANSPARENT
                 })
-                .stroke(if selected {
-                    Stroke::new(1.0, ACCENT)
-                } else {
-                    Stroke::NONE
-                })
+                .corner_radius(egui::CornerRadius::same(12))
                 .min_size(Vec2::new(ui.available_width(), 36.0));
             if ui.add(button).clicked() {
                 self.page = page;
@@ -505,23 +500,23 @@ impl App {
             ui.add_space(12.0);
             if let Some(model) = self.caps.as_ref().and_then(|c| c.model.clone()) {
                 ui.horizontal(|ui| {
-                    ui.add_space(6.0);
+                    ui.add_space(12.0);
                     ui.label(dim(format!("{} {model}", self.t("row.profile"))));
                 });
             }
             let (color, text) = if self.busy() && self.values.is_empty() {
-                (WARN, self.t("busy"))
+                (p.warn, self.t("busy"))
             } else if self.demo {
-                (ACCENT, self.t("demo_mode"))
+                (p.accent, self.t("demo_mode"))
             } else if self.connected {
-                (OK, self.t("connected"))
+                (p.ok, self.t("connected"))
             } else {
-                (ERR, self.t("disconnected"))
+                (p.err, self.t("disconnected"))
             };
             ui.horizontal(|ui| {
-                ui.add_space(6.0);
+                ui.add_space(12.0);
                 ui.label(RichText::new("●").color(color));
-                ui.label(RichText::new(text).color(TEXT_DIM));
+                ui.label(RichText::new(text).color(p.text_dim));
             });
         });
     }
@@ -539,19 +534,20 @@ impl App {
                 }
             });
         });
+        let p = palette(ui);
         let mut clear = false;
         match &self.message {
             Some(Message::Loaded(at)) if at.elapsed() < Duration::from_secs(5) => {
-                ui.label(RichText::new(self.t("loaded")).color(OK).small());
+                ui.label(RichText::new(self.t("loaded")).color(p.ok).small());
                 ui.ctx().request_repaint_after(Duration::from_secs(1));
             }
             Some(Message::Info(text, at)) if at.elapsed() < Duration::from_secs(5) => {
-                ui.label(RichText::new(text).color(OK).small());
+                ui.label(RichText::new(text).color(p.ok).small());
                 ui.ctx().request_repaint_after(Duration::from_secs(1));
             }
             Some(Message::Error(text)) => {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(text).color(ERR).small());
+                    ui.label(RichText::new(text).color(p.err).small());
                     clear = ui.small_button("✕").clicked();
                 });
             }
@@ -616,32 +612,16 @@ impl App {
                 .changed()
                 .then_some(u16::from(on));
         }
-        if !values.is_empty() && values.len() <= 10 {
-            let mut chosen = None;
-            ui.horizontal_wrapped(|ui| {
-                for &(x, _) in &values {
-                    if theme::chip(ui, v.current == x, &self.value_text(f, x)) && x != v.current {
-                        chosen = Some(x);
-                    }
-                }
-            });
-            return chosen;
-        }
         if !values.is_empty() {
-            let mut selected = v.current;
-            egui::ComboBox::from_id_salt(f.code)
-                .width(220.0)
-                .selected_text(self.value_text(f, v.current))
-                .show_ui(ui, |ui| {
-                    for &(x, _) in &values {
-                        ui.selectable_value(&mut selected, x, self.value_text(f, x));
-                    }
-                });
-            return (selected != v.current).then_some(selected);
+            let options: Vec<(u16, String)> = values
+                .iter()
+                .map(|&(x, _)| (x, self.value_text(f, x)))
+                .collect();
+            return theme::choice(ui, f.code, v.current, &options);
         }
         if v.max > 0 && v.current <= v.max {
             let mut value = self.drafts.get(&f.code).copied().unwrap_or(v.current);
-            let r = ui.add(egui::Slider::new(&mut value, 0..=v.max));
+            let r = theme::slider(ui, &mut value, v.max);
             if r.changed() {
                 self.drafts.insert(f.code, value);
             }
@@ -728,19 +708,15 @@ impl App {
 
     fn page_presets(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.save_preset"), self.t("card.save_preset.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
-            ui.horizontal(|ui| {
-                let hint = self.t("preset_name");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.new_name)
-                        .hint_text(hint)
-                        .desired_width(260.0),
-                );
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let label = self.t("preset_name");
+            theme::row(ui, &label, |ui| {
                 let name = self.new_name.trim().to_string();
                 let can = !name.is_empty() && !self.values.is_empty() && !self.writing();
-                let save = egui::Button::new(RichText::new(self.t("save")).color(Color32::WHITE))
-                    .fill(ACCENT);
-                if ui.add_enabled(can, save).clicked() {
+                let save = theme::primary(ui, &self.t("save"));
+                let clicked = ui.add_enabled(can, save).clicked();
+                ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(240.0));
+                if clicked {
                     let allow = self.settings.allow_unverified;
                     let values = preset_logic::capture(&self.current_values(), |f| {
                         f.status.safe_to_write() || allow
@@ -758,61 +734,55 @@ impl App {
         });
 
         let (title, hint) = (self.t("card.presets"), self.t("card.presets.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             if self.presets.list.is_empty() {
-                ui.label(dim(self.t("presets_empty")));
+                let label = self.t("presets_empty");
+                theme::row(ui, &label, |_| {});
                 return;
             }
+            let colors = palette(ui);
             let current = self.current_values();
             let mut apply = None;
             let mut overwrite = None;
             let mut delete = None;
             for (i, p) in self.presets.list.iter().enumerate() {
-                if i > 0 {
-                    ui.separator();
-                }
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&p.name).strong().color(Color32::WHITE));
-                            if preset_logic::matches(&p.values, &current) {
-                                ui.label(
-                                    RichText::new(format!("● {}", self.t("active")))
-                                        .small()
-                                        .color(OK),
-                                );
-                            }
-                        });
-                        ui.label(dim(self.preset_summary(p)));
+                let active = preset_logic::matches(&p.values, &current);
+                theme::row(ui, &p.name, |ui| {
+                    let apply_button = theme::primary(ui, &self.t("apply"));
+                    if ui
+                        .add_enabled(!self.writing() && !self.values.is_empty(), apply_button)
+                        .clicked()
+                    {
+                        apply = Some(i);
+                    }
+                    if ui
+                        .add_enabled(!self.writing(), egui::Button::new(self.t("overwrite")))
+                        .clicked()
+                    {
+                        overwrite = Some(i);
+                    }
+                    let confirming = self.confirm_delete == Some(i);
+                    let text = RichText::new(if confirming {
+                        self.t("confirm_delete")
+                    } else {
+                        self.t("delete")
+                    })
+                    .color(if confirming {
+                        colors.err
+                    } else {
+                        colors.text_dim
                     });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let confirming = self.confirm_delete == Some(i);
-                        let label = if confirming {
-                            self.t("confirm_delete")
-                        } else {
-                            self.t("delete")
-                        };
-                        let text =
-                            RichText::new(label).color(if confirming { ERR } else { TEXT_DIM });
-                        if ui.button(text).clicked() {
-                            delete = Some(i);
-                        }
-                        if ui
-                            .add_enabled(!self.writing(), egui::Button::new(self.t("overwrite")))
-                            .clicked()
-                        {
-                            overwrite = Some(i);
-                        }
-                        let apply_button =
-                            egui::Button::new(RichText::new(self.t("apply")).color(Color32::WHITE))
-                                .fill(ACCENT);
-                        if ui
-                            .add_enabled(!self.writing() && !self.values.is_empty(), apply_button)
-                            .clicked()
-                        {
-                            apply = Some(i);
-                        }
-                    });
+                    if ui.button(text).clicked() {
+                        delete = Some(i);
+                    }
+                    ui.label(dim(self.preset_summary(p)));
+                    if active {
+                        ui.label(
+                            RichText::new(format!("● {}", self.t("active")))
+                                .small()
+                                .color(colors.ok),
+                        );
+                    }
                 });
             }
             if let Some(i) = apply {
@@ -843,46 +813,45 @@ impl App {
 
     fn page_picture(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.mode"), self.t("card.mode.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
-            self.control(ui, "picture-mode")
+        theme::group(ui, &title, Some(&hint), |ui| {
+            self.feature_row(ui, "picture-mode");
         });
         let title = self.t("card.basic");
-        theme::card(ui, &title, None, |ui| {
+        theme::group(ui, &title, None, |ui| {
             for name in ["brightness", "contrast", "sharpness"] {
                 self.feature_row(ui, name);
             }
         });
         let (title, hint) = (self.t("card.color"), self.t("card.color.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             for name in ["color-tone", "red-gain", "green-gain", "blue-gain"] {
                 self.feature_row(ui, name);
             }
         });
         let (title, hint) = (self.t("card.comfort"), self.t("card.comfort.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
-            self.feature_row(ui, "eye-saver")
+        theme::group(ui, &title, Some(&hint), |ui| {
+            self.feature_row(ui, "eye-saver");
         });
     }
 
     fn page_game(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.black_eq"), self.t("card.black_eq.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             let label = self.t("row.level");
             theme::row(ui, &label, |ui| self.control(ui, "black-equalizer"));
         });
         let (title, hint) = (self.t("card.aim"), self.t("card.aim.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
-            self.control(ui, "aim-point");
+        theme::group(ui, &title, Some(&hint), |ui| {
+            self.feature_row(ui, "aim-point");
             let shown = self
                 .reading("aim-point")
                 .is_some_and(|v| v.current != 0 && !features::is_disabled(v.current, v.max));
             if shown {
-                ui.add_space(10.0);
                 self.aim_pad(ui);
             }
         });
         let (title, hint) = (self.t("card.sync"), self.t("card.sync.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             match self.reading("adaptive-sync") {
                 Some(v) => {
                     let kind = if features::decode_adaptive_sync(v.current).freesync {
@@ -898,7 +867,8 @@ impl App {
                     });
                 }
                 None => {
-                    ui.label(dim(self.t("not_supported")));
+                    let label = self.t("not_supported");
+                    theme::row(ui, &label, |_| {});
                 }
             }
         });
@@ -922,7 +892,16 @@ impl App {
         };
         let mut moved = None;
         let mut target = None;
+        let steps: Vec<(u16, String)> = [1u16, 10, 50].map(|n| (n, n.to_string())).into();
+        let label = self.t("aim.steps");
         theme::row(ui, &label, |ui| {
+            if let Some(n) = theme::choice(ui, "aim-steps", self.aim_steps, &steps) {
+                self.aim_steps = n;
+            }
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
             ui.add_enabled_ui(enabled, |ui| {
                 if let Some(b) = self.aim_border {
                     if let Some(p) = screen_pad(ui, b, pos, self.aim_target) {
@@ -931,16 +910,9 @@ impl App {
                     ui.add_space(16.0);
                 }
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 6.0;
                     ui.horizontal(|ui| {
-                        ui.label(dim(self.t("aim.steps")));
-                        for n in [1u16, 10, 50] {
-                            if theme::chip(ui, self.aim_steps == n, &n.to_string()) {
-                                self.aim_steps = n;
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.add_space(34.0);
+                        ui.add_space(38.0);
                         if ui.button(" ▲ ").clicked() {
                             moved = Some(Move::Up);
                         }
@@ -949,13 +921,13 @@ impl App {
                         if ui.button(" ◀ ").clicked() {
                             moved = Some(Move::Left);
                         }
-                        ui.add_space(8.0);
+                        ui.add_space(14.0);
                         if ui.button(" ▶ ").clicked() {
                             moved = Some(Move::Right);
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.add_space(34.0);
+                        ui.add_space(38.0);
                         if ui.button(" ▼ ").clicked() {
                             moved = Some(Move::Down);
                         }
@@ -995,23 +967,51 @@ impl App {
                 });
             });
         });
-        ui.label(dim(self.t("aim.pad_hint")));
-        if !allowed {
-            self.lock_label(ui);
-        }
-        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(dim(self.t("aim.pad_hint")));
+            if !allowed {
+                self.lock_label(ui);
+            }
+        });
+        ui.add_space(8.0);
         let label = self.t("aim.saved");
         let mut save = false;
         let mut delete = None;
         theme::row(ui, &label, |ui| {
+            let can = !self.aim_name.trim().is_empty();
+            save = ui
+                .add_enabled(can, egui::Button::new(self.t("aim.save")))
+                .clicked();
+            let hint = self.t("aim.name");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.aim_name)
+                    .hint_text(hint)
+                    .desired_width(110.0),
+            );
+        });
+        if !self.presets.aim.is_empty() {
+            let colors = palette(ui);
             ui.horizontal_wrapped(|ui| {
+                ui.add_space(8.0);
                 for (i, spot) in self.presets.aim.iter().enumerate() {
                     let here = Position {
                         x: spot.x,
                         y: spot.y,
                     };
                     let text = format!("{} ({}, {})", spot.name, spot.x, spot.y);
-                    if theme::chip(ui, here == pos, &text) && enabled && here != pos {
+                    let selected = here == pos;
+                    let button = egui::Button::new(RichText::new(text).color(if selected {
+                        Color32::WHITE
+                    } else {
+                        colors.text
+                    }))
+                    .fill(if selected {
+                        colors.accent
+                    } else {
+                        colors.track
+                    });
+                    if ui.add(button).clicked() && enabled && !selected {
                         target = Some(here);
                     }
                     if ui
@@ -1023,21 +1023,9 @@ impl App {
                     }
                     ui.add_space(6.0);
                 }
-                let hint = self.t("aim.name");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.aim_name)
-                        .hint_text(hint)
-                        .desired_width(110.0),
-                );
-                let can = !self.aim_name.trim().is_empty();
-                if ui
-                    .add_enabled(can, egui::Button::new(self.t("aim.save")))
-                    .clicked()
-                {
-                    save = true;
-                }
             });
-        });
+            ui.add_space(8.0);
+        }
         if save {
             let name = self.aim_name.trim().to_string();
             self.presets.put_aim(AimSpot {
@@ -1070,7 +1058,7 @@ impl App {
 
     fn page_lighting(&mut self, ui: &mut egui::Ui) {
         let (title, hint) = (self.t("card.lighting"), self.t("card.lighting.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             for (key, name) in [
                 ("row.lighting", "lighting"),
                 ("row.effect", "lighting-effect"),
@@ -1079,9 +1067,10 @@ impl App {
                 let label = self.t(key);
                 theme::row(ui, &label, |ui| self.control(ui, name));
             }
-            ui.label(dim(self.t("row.colour.hint")));
-            ui.add_space(6.0);
-            let (label, hint) = (self.t("row.coresync"), self.t("coresync.hint"));
+        });
+        let (title, hint) = (self.t("row.coresync"), self.t("coresync.hint"));
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let label = self.t("row.state");
             let lighting = self.reading("lighting");
             let allowed = self.action_allowed("coresync");
             let mut change = None;
@@ -1104,7 +1093,6 @@ impl App {
                     ui.label(dim(self.t("no_data")));
                 }
             });
-            ui.label(dim(hint));
             if let Some(on) = change {
                 self.act(Action::CoreSync(on));
             }
@@ -1140,39 +1128,38 @@ impl App {
             });
         } else if status.on {
             let label = self.t("pip.size");
+            let sizes: Vec<(u8, String)> = (0..status.pip_sizes)
+                .map(|n| (n, (n + 1).to_string()))
+                .collect();
             theme::row(ui, &label, |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
-                    for n in 0..status.pip_sizes {
-                        if theme::chip(ui, status.pip_size == n, &(n + 1).to_string())
-                            && status.pip_size != n
-                        {
-                            cmd = Some(pip::Command::PipSize(n));
-                        }
+                    if let Some(n) = theme::choice(ui, "pip-size", status.pip_size, &sizes) {
+                        cmd = Some(pip::Command::PipSize(n));
                     }
                 });
             });
             let label = self.t("pip.corner");
+            let corners: Vec<(u8, String)> = (0..4u8)
+                .map(|n| (n, self.t(&format!("pip.corner.{n}"))))
+                .collect();
             theme::row(ui, &label, |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for n in 0..4u8 {
-                            let text = self.t(&format!("pip.corner.{n}"));
-                            if theme::chip(ui, status.pip_position == n, &text)
-                                && status.pip_position != n
-                            {
-                                cmd = Some(pip::Command::PipPosition(n));
-                            }
-                        }
-                    });
+                    if let Some(n) = theme::choice(ui, "pip-corner", status.pip_position, &corners)
+                    {
+                        cmd = Some(pip::Command::PipPosition(n));
+                    }
                 });
             });
             // The monitor's own inputs, named as the PIP source register names them.
-            let inputs: Vec<(Source, String)> = features::find("input")
+            let inputs: Vec<(Option<Source>, String)> = features::find("input")
                 .map(|f| {
                     f.values
                         .iter()
                         .filter_map(|&(code, name)| {
-                            Some((Source::from_input_code(code)?, self.t(&format!("v.{name}"))))
+                            Some((
+                                Some(Source::from_input_code(code)?),
+                                self.t(&format!("v.{name}")),
+                            ))
                         })
                         .collect()
                 })
@@ -1189,19 +1176,9 @@ impl App {
                 let label = self.t(key);
                 theme::row(ui, &label, |ui| {
                     ui.add_enabled_ui(allowed_src && !self.writing(), |ui| {
-                        let selected = pick.map(|s| s.label()).unwrap_or_else(|| "—".into());
-                        egui::ComboBox::from_id_salt(key)
-                            .width(160.0)
-                            .selected_text(selected)
-                            .show_ui(ui, |ui| {
-                                for (src, name) in &inputs {
-                                    if ui.selectable_label(pick == Some(*src), name).clicked()
-                                        && pick != Some(*src)
-                                    {
-                                        source = Some((channel, *src));
-                                    }
-                                }
-                            });
+                        if let Some(Some(src)) = theme::choice(ui, key, pick, &inputs) {
+                            source = Some((channel, src));
+                        }
                     });
                     if !allowed_src {
                         self.lock_label(ui);
@@ -1221,24 +1198,25 @@ impl App {
 
     fn page_source(&mut self, ui: &mut egui::Ui) {
         let title = self.t("card.input");
-        theme::card(ui, &title, None, |ui| {
+        theme::group(ui, &title, None, |ui| {
             let label = self.t("row.input");
             theme::row(ui, &label, |ui| self.control(ui, "input"));
         });
         let title = self.t("card.audio");
-        theme::card(ui, &title, None, |ui| {
+        theme::group(ui, &title, None, |ui| {
             let label = self.t("row.volume");
             theme::row(ui, &label, |ui| self.control(ui, "volume"));
         });
         let (title, hint) = (self.t("card.pip"), self.t("card.pip.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| match self.reading("pip") {
+        theme::group(ui, &title, Some(&hint), |ui| match self.reading("pip") {
             Some(v) => self.pip_controls(ui, pip::decode_status(v.current)),
             None => {
-                ui.label(dim(self.t("not_supported")));
+                let label = self.t("not_supported");
+                theme::row(ui, &label, |_| {});
             }
         });
         let title = self.t("card.osd");
-        theme::card(ui, &title, None, |ui| {
+        theme::group(ui, &title, None, |ui| {
             self.feature_row(ui, "language");
             self.feature_row(ui, "pc-av-mode");
         });
@@ -1246,7 +1224,7 @@ impl App {
 
     fn page_monitor(&mut self, ui: &mut egui::Ui) {
         let title = self.t("card.monitor");
-        theme::card(ui, &title, None, |ui| {
+        theme::group(ui, &title, None, |ui| {
             let name = self.name.clone().unwrap_or_else(|| "—".into());
             theme::row(ui, &self.t("row.name"), |ui| {
                 ui.label(name);
@@ -1259,8 +1237,8 @@ impl App {
                     Profile::Other(_) => String::new(),
                 };
                 theme::row(ui, &self.t("row.profile"), |ui| {
-                    ui.label(caps.model.as_deref().unwrap_or("?"));
                     ui.label(dim(kind));
+                    ui.label(caps.model.as_deref().unwrap_or("?"));
                 });
                 theme::row(ui, &self.t("row.mccs"), |ui| {
                     ui.label(caps.mccs_version.as_deref().unwrap_or("?"));
@@ -1271,8 +1249,13 @@ impl App {
                         egui::Label::new(RichText::new(codes.join(" ")).monospace().small()).wrap(),
                     );
                 });
-                egui::CollapsingHeader::new(self.t("caps_raw")).show(ui, |ui| {
-                    ui.add(egui::Label::new(RichText::new(&caps.raw).monospace().small()).wrap());
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    egui::CollapsingHeader::new(self.t("caps_raw")).show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(&caps.raw).monospace().small()).wrap(),
+                        );
+                    });
                 });
             }
         });
@@ -1283,13 +1266,16 @@ impl App {
         let ctx = ui.ctx().clone();
         let mut pick = None;
         let mut rescan = false;
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let colors = palette(ui);
             match self.displays.as_deref() {
                 None => {
-                    ui.label(dim(self.t("no_data")));
+                    let label = self.t("no_data");
+                    theme::row(ui, &label, |_| {});
                 }
                 Some([]) => {
-                    ui.label(dim(self.t("no_monitors")));
+                    let label = self.t("no_monitors");
+                    theme::row(ui, &label, |_| {});
                 }
                 Some(list) => {
                     // Without --bus the worker opens the first Samsung monitor.
@@ -1297,30 +1283,26 @@ impl App {
                         .bus
                         .or_else(|| list.iter().find(|d| d.samsung).map(|d| d.bus));
                     for d in list {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&d.name).color(Color32::WHITE));
+                        theme::row(ui, &d.name, |ui| {
+                            if current == Some(d.bus) {
+                                ui.label(RichText::new(self.t("current")).small().color(colors.ok));
+                            } else if ui
+                                .add_enabled(!self.busy(), egui::Button::new(self.t("use_monitor")))
+                                .clicked()
+                            {
+                                pick = Some(d.bus);
+                            }
                             ui.label(dim(format!("/dev/i2c-{}", d.bus)));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if current == Some(d.bus) {
-                                    ui.label(RichText::new(self.t("current")).small().color(OK));
-                                } else if ui
-                                    .add_enabled(
-                                        !self.busy(),
-                                        egui::Button::new(self.t("use_monitor")),
-                                    )
-                                    .clicked()
-                                {
-                                    pick = Some(d.bus);
-                                }
-                            });
                         });
                     }
                 }
             }
-            ui.add_space(4.0);
-            rescan = ui
-                .add_enabled(!self.busy(), egui::Button::new(self.t("rescan")))
-                .clicked();
+            let label = self.t("rescan");
+            theme::row(ui, "", |ui| {
+                rescan = ui
+                    .add_enabled(!self.busy(), egui::Button::new(label))
+                    .clicked();
+            });
         });
         if let Some(bus) = pick {
             self.switch_monitor(&ctx, bus);
@@ -1330,19 +1312,20 @@ impl App {
             self.request(Request::Discover);
         }
         let (title, hint) = (self.t("card.sdm"), self.t("card.sdm.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!self.writing(), egui::Button::new(self.t("sdm_on")))
-                    .clicked()
-                {
-                    self.request(Request::Sdm(true));
-                }
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let label = self.t("row.profile");
+            theme::row(ui, &label, |ui| {
                 if ui
                     .add_enabled(!self.writing(), egui::Button::new(self.t("sdm_off")))
                     .clicked()
                 {
                     self.request(Request::Sdm(false));
+                }
+                if ui
+                    .add_enabled(!self.writing(), egui::Button::new(self.t("sdm_on")))
+                    .clicked()
+                {
+                    self.request(Request::Sdm(true));
                 }
             });
         });
@@ -1350,33 +1333,26 @@ impl App {
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
         let title = self.t("card.app");
-        theme::card(ui, &title, None, |ui| {
+        let hint = self.t("unverified_hint");
+        theme::group(ui, &title, Some(&hint), |ui| {
             let mut changed = false;
             theme::row(ui, &self.t("row.language"), |ui| {
-                egui::ComboBox::from_id_salt("app-language")
-                    .selected_text(self.settings.language.native_name())
-                    .show_ui(ui, |ui| {
-                        for lang in Lang::ALL {
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.settings.language,
-                                    lang,
-                                    lang.native_name(),
-                                )
-                                .changed();
-                        }
-                    });
+                let langs: Vec<(Lang, String)> =
+                    Lang::ALL.map(|l| (l, l.native_name().to_string())).into();
+                if let Some(l) = theme::choice(ui, "app-language", self.settings.language, &langs) {
+                    self.settings.language = l;
+                    changed = true;
+                }
             });
             theme::row(ui, &self.t("row.unverified"), |ui| {
                 changed |= theme::toggle(ui, &mut self.settings.allow_unverified).changed();
             });
-            ui.label(dim(self.t("unverified_hint")));
             if changed {
                 self.save_settings();
             }
         });
         let (title, hint) = (self.t("card.desktop"), self.t("card.desktop.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             let mut changed = false;
             theme::row(ui, &self.t("row.close_to_tray"), |ui| {
                 changed |= theme::toggle(ui, &mut self.settings.close_to_tray).changed();
@@ -1402,7 +1378,7 @@ impl App {
             }
         });
         let (title, hint) = (self.t("card.about"), self.t("card.about.hint"));
-        theme::card(ui, &title, Some(&hint), |ui| {
+        theme::group(ui, &title, Some(&hint), |ui| {
             theme::row(ui, &self.t("row.version"), |ui| {
                 ui.label(concat!("odyssey-ctl ", env!("CARGO_PKG_VERSION")));
             });
@@ -1431,16 +1407,17 @@ fn screen_pad(
             inner.top() + fy * inner.height(),
         )
     };
+    let p = palette(ui);
     let painter = ui.painter();
     let outline = if ui.is_enabled() {
-        TEXT_DIM
+        p.text_dim
     } else {
-        TEXT_DIM.gamma_multiply(0.5)
+        p.text_dim.gamma_multiply(0.5)
     };
     painter.rect(
         rect,
-        6.0,
-        theme::CONTROL,
+        12.0,
+        p.track,
         Stroke::new(1.0, outline),
         egui::StrokeKind::Inside,
     );
@@ -1453,13 +1430,13 @@ fn screen_pad(
         Stroke::new(2.0, outline),
     );
     if let Some(d) = draft {
-        painter.circle_stroke(to_pad(d), 5.0, Stroke::new(1.0, WARN));
+        painter.circle_stroke(to_pad(d), 5.0, Stroke::new(1.0, p.warn));
     }
     let c = to_pad(pos);
     let arm = Vec2::new(11.0, 0.0);
-    painter.line_segment([c - arm, c + arm], Stroke::new(1.5, ACCENT));
-    painter.line_segment([c - arm.yx(), c + arm.yx()], Stroke::new(1.5, ACCENT));
-    painter.circle_stroke(c, 6.0, Stroke::new(2.0, ACCENT));
+    painter.line_segment([c - arm, c + arm], Stroke::new(1.5, p.accent));
+    painter.line_segment([c - arm.yx(), c + arm.yx()], Stroke::new(1.5, p.accent));
+    painter.circle_stroke(c, 6.0, Stroke::new(2.0, p.accent));
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     }
@@ -1481,16 +1458,20 @@ impl eframe::App for App {
         self.poll_tray();
         let ctx = ui.ctx().clone();
         self.screenshot_step(&ctx);
+        let p = palette(ui);
         egui::Panel::left("nav")
             .resizable(false)
             .exact_size(210.0)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG)
-                    .inner_margin(egui::Margin::same(10)),
+                    .fill(p.bg)
+                    .inner_margin(egui::Margin::same(8)),
             )
             .show(ui, |ui| self.sidebar(ui));
-        egui::CentralPanel::default_margins().show(ui, |ui| {
+        let frame = egui::Frame::new()
+            .fill(p.surface)
+            .inner_margin(egui::Margin::symmetric(20, 16));
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             self.top_bar(ui);
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- GUI restyle: light and dark palettes that follow the system theme, Inter and Rajdhani fonts,
+  pages as grouped lists with the control on the right, option menus with a check mark instead
+  of chip rows, sliders with an editable value, concentric corner radii. Screenshots are now saved
+  for both themes (`*_light.png`).
+
 ## [0.2.0] - 2026-11-06
 
 ### Added

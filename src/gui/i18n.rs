@@ -273,11 +273,6 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("row.lighting", "Lights", "Luci"),
     ("row.effect", "Effect", "Effetto"),
     ("row.colour", "Colour", "Colore"),
-    (
-        "row.colour.hint",
-        "The colour can be chosen with single-colour effects such as Static.",
-        "Il colore si sceglie con gli effetti a colore singolo, come Statico.",
-    ),
     ("row.input", "Source", "Sorgente"),
     ("row.volume", "Volume", "Volume"),
     ("row.supported", "Supported", "Supportato"),

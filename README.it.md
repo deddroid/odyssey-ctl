@@ -22,13 +22,17 @@ reverse engineering. Nessun componente del software Samsung è incluso.
   nel tray a finestra chiusa. Vengono scritte solo le impostazioni diverse.
 - Ogni scrittura viene riletta dal monitor; le voci che il monitor dichiara non disponibili (per
   esempio con Eye Saver attivo) sono mostrate come tali e mai scritte.
-- Inglese e italiano; l'app segue la lingua di sistema.
+- Inglese e italiano; l'app segue la lingua e il tema di sistema (chiaro e scuro).
 - Nessuna lettura in background: il monitor viene letto all'apertura e premendo Aggiorna, così il
   suo menu continua a funzionare.
 
 | Gioco | Preset |
 |---|---|
 | ![Pagina Gioco](docs/screenshots/it_game.png) | ![Pagina Preset](docs/screenshots/it_presets.png) |
+
+| Tema chiaro | Ingressi e audio |
+|---|---|
+| ![Pagina Immagine, tema chiaro](docs/screenshots/it_picture_light.png) | ![Pagina Ingressi](docs/screenshots/it_source.png) |
 
 ## Compatibilità
 
@@ -122,7 +126,7 @@ Con più monitor collegati, `--bus N` sceglie quale usare.
 |---|---|
 | `ODYSSEY_CTL_DEBUG=1` | Stampa ogni pacchetto DDC/CI inviato e ricevuto |
 | `ODYSSEY_CTL_DEMO=1` | Usa una copia incorporata di un G60SD al posto del monitor reale |
-| `ODYSSEY_CTL_SCREENSHOTS=<cartella>` | GUI: salva uno screenshot di ogni pagina in ogni lingua, poi esce |
+| `ODYSSEY_CTL_SCREENSHOTS=<cartella>` | GUI: salva uno screenshot di ogni pagina in ogni lingua e tema, poi esce |
 | `ODYSSEY_CTL_CONFIG_DIR=<cartella>` | Dove stanno `settings.toml` e `presets.toml` |
 | `ODYSSEY_CTL_DDC_REPLY_MS`, `ODYSSEY_CTL_DDC_GAP_MS` | Tempi DDC/CI (default 30 e 20 ms); alzali se un monitor risponde con errori |
 
@@ -155,7 +159,8 @@ sottili sopra di essa.
   [olebru/streamdeck-ddc-monitor-control](https://github.com/olebru/streamdeck-ddc-monitor-control)
   per i codici PBP e degli ingressi di altri modelli Odyssey.
 - [ddcutil](https://www.ddcutil.com/) per le prime prove e la regola udev.
-- L'interfaccia è realizzata con [egui](https://github.com/emilk/egui).
+- L'interfaccia è realizzata con [egui](https://github.com/emilk/egui) e include i font [Inter](https://rsms.me/inter/) e
+  [Rajdhani](https://fonts.google.com/specimen/Rajdhani) (SIL Open Font License, vedi `assets/fonts/`).
 
 Samsung e Odyssey sono marchi di Samsung Electronics. Questo progetto non è affiliato a Samsung.
 
