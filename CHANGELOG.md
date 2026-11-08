@@ -6,16 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
+### Added
+- Light theme: the app follows the system theme, and Settings has a Theme row to force
+  system, light or dark.
+- Aim point: the screen outline shows the real crosshair of the chosen type and colour, and the
+  icon is chosen in two rows, type (A or B) and colour (light blue, red, white).
+
 ### Changed
-- GUI restyle: light and dark palettes that follow the system theme, Inter and Rajdhani fonts,
-  pages as grouped lists with the control on the right, option menus with a check mark instead
-  of chip rows, sliders with an editable value, concentric corner radii. Screenshots are now saved
-  for both themes (`*_light.png`). The theme (system, light or dark) is chosen in Settings.
-- Aim point in the GUI: the icon is chosen as type (A or B) and colour; the arrows sit around
-  the Centre button and move by exactly the chosen number of units (1, 10 or 50); typed
-  coordinates are written as soon as they settle, so the Apply button is gone. The screen
-  outline shows the real crosshair of the chosen type and colour, Y counts from the bottom
-  like a Cartesian axis, and the box stays open while the position is read again.
+- New look: Inter and Rajdhani fonts (bundled, SIL Open Font License), pages as grouped lists
+  with the control on the right, option menus with a check mark instead of chip rows, sliders
+  with an editable value, concentric corner radii.
+- Aim point: the arrows sit around the Centre button and move by exactly 1, 10 or 50 units;
+  typed coordinates are written as soon as they settle; Y counts from the bottom like a
+  Cartesian axis in the GUI (the CLI and `presets.toml` keep the monitor's coordinates); the box
+  stays open while the position is read again after an icon change.
+- `ODYSSEY_CTL_SCREENSHOTS` saves every page in both themes (`*_light.png`), without the index
+  prefix in the file names.
+
+### Removed
+- The Apply button next to the aim point coordinates (they are applied as soon as they settle).
+
+### Verified on hardware
+- G60SD, firmware 1006.0: the new interface was tried on the monitor; the writes are the same as
+  in 0.2.0.
 
 ## [0.2.0] - 2026-11-06
 
