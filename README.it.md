@@ -20,6 +20,8 @@ reverse engineering. Nessun componente del software Samsung è incluso.
 - **Ingressi e audio**: sorgente, volume, Picture-in-Picture (accensione, dimensione, angolo, ingressi, audio), lingua dell'OSD, modalità PC/AV.
 - **Preset**: salva lo stato attuale con un nome e torna indietro con un clic, anche dall'icona
   nel tray a finestra chiusa. Vengono scritte solo le impostazioni diverse.
+- **Per applicazione** (KDE Plasma): un preset per classe di finestra, applicato quando quella
+  finestra prende il fuoco, e uno a cui tornare.
 - Ogni scrittura viene riletta dal monitor; le voci che il monitor dichiara non disponibili (per
   esempio con Eye Saver attivo) sono mostrate come tali e mai scritte.
 - Inglese e italiano; l'app segue la lingua e il tema di sistema (chiaro o scuro, o scegli tu nelle Impostazioni).
@@ -141,6 +143,12 @@ scrive una volta sola.
   `odyssey-ctl-preset@.service` applica il preset con il nome dell'istanza e
   `odyssey-ctl-night.timer` è un esempio di orario (copia entrambi in `~/.config/systemd/user/`,
   poi `systemctl --user enable --now odyssey-ctl-night.timer`).
+- **Per applicazione (KDE Plasma 6):** nell'app, Preset → Per applicazione, attiva *Segui la
+  finestra attiva*. Installa un piccolo script KWin che comunica all'app la finestra attiva via
+  D-Bus (una chiamata per cambio di fuoco, niente polling). Aggiungi una regola per classe di
+  finestra (la riga *Finestra attiva* la mostra; `*` e `?` sono jolly) con il preset da applicare,
+  e scegli il preset a cui tornare quando prende il fuoco una finestra senza regola. Le regole
+  stanno in `presets.toml` (`[[app]]` e `app_default`).
 - **Al ripristino dalla sospensione:**
   [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume) è un gancio di
   systemd-sleep che applica un preset qualche secondo dopo il ripristino, come l'utente indicato in

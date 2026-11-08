@@ -226,7 +226,7 @@ pub fn group(ui: &mut egui::Ui, title: &str, hint: Option<&str>, add: impl FnOnc
     if let Some(hint) = hint {
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(dim(hint));
+            ui.add(egui::Label::new(dim(hint)).wrap());
         });
     }
     ui.add_space(12.0);

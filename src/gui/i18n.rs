@@ -95,6 +95,52 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("active", "active", "attivo"),
     ("n_settings", "{n} settings", "{n} impostazioni"),
     (
+        "card.apps",
+        "Per application (KDE Plasma)",
+        "Per applicazione (KDE Plasma)",
+    ),
+    (
+        "card.apps.hint",
+        "When a window with a rule gets the focus its preset is applied; when the focus goes to a window without one, the preset chosen here.",
+        "Quando prende il fuoco una finestra con una regola viene applicato il suo preset; quando passa a una finestra senza regola, il preset scelto qui.",
+    ),
+    ("card.rules", "Window rules", "Regole per finestra"),
+    (
+        "card.rules.hint",
+        "Class of the window as the active window row shows it; * and ? are wildcards. Rules are checked in order, the first match wins.",
+        "Classe della finestra come la mostra la riga della finestra attiva; * e ? sono jolly. Le regole valgono in ordine, vince la prima che corrisponde.",
+    ),
+    (
+        "row.follow_window",
+        "Follow the active window",
+        "Segui la finestra attiva",
+    ),
+    (
+        "follow_window.hint",
+        "Installs a small KWin script that reports the focused window to this app; needs KDE Plasma 6.",
+        "Installa un piccolo script KWin che comunica a quest'app la finestra attiva; richiede KDE Plasma 6.",
+    ),
+    ("row.active_window", "Active window", "Finestra attiva"),
+    (
+        "apps.class",
+        "Window class, e.g. steam_app_*",
+        "Classe della finestra, es. steam_app_*",
+    ),
+    ("apps.add", "Add rule", "Aggiungi regola"),
+    ("apps.new", "New rule", "Nuova regola"),
+    (
+        "row.app_default",
+        "When no rule matches",
+        "Senza regola corrispondente",
+    ),
+    ("apps.keep", "Leave as it is", "Lascia com'è"),
+    (
+        "apps.use_active",
+        "Use active window",
+        "Usa la finestra attiva",
+    ),
+    ("apps.rule", "Rule {n}", "Regola {n}"),
+    (
         "preset_saved",
         "Preset “{name}” saved.",
         "Preset “{name}” salvato.",

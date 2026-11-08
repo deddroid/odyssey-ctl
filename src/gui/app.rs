@@ -18,7 +18,7 @@ use crate::i18n::{Lang, tr};
 use crate::settings::{Settings, ThemeChoice};
 use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
-use odyssey_ctl::presets::{AimSpot, Preset, Presets};
+use odyssey_ctl::presets::{AimSpot, AppRule, Preset, Presets};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -105,6 +105,9 @@ pub struct App {
     presets: Presets,
     /// Name typed for a new preset.
     new_name: String,
+    /// Window class typed for a new per-application rule, and the preset chosen for it.
+    new_rule_class: String,
+    new_rule_preset: usize,
     /// Preset waiting for the second click on "Delete".
     confirm_delete: Option<usize>,
     /// Bus the worker opens (None = the first Samsung monitor).
@@ -169,6 +172,8 @@ impl App {
             shots,
             presets: Presets::load(),
             new_name: String::new(),
+            new_rule_class: String::new(),
+            new_rule_preset: 0,
             confirm_delete: None,
             bus,
             aim_position: None,
@@ -866,6 +871,145 @@ impl App {
                 }
             }
         });
+        #[cfg(target_os = "linux")]
+        self.apps_group(ui);
+    }
+
+    /// Per-application rules: the switch that installs the KWin script, the last window seen,
+    /// one row per rule and a row to add one.
+    #[cfg(target_os = "linux")]
+    fn apps_group(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.apps"), self.t("card.apps.hint"));
+        let last = self.shell.last_window.lock().ok().and_then(|l| l.clone());
+        let names: Vec<(usize, String)> = self
+            .presets
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p.name.clone()))
+            .collect();
+        let mut follow = None;
+        let mut set_preset = None;
+        let mut set_default = None;
+        let mut delete = None;
+        let mut add = false;
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let label = self.t("row.follow_window");
+            theme::row(ui, &label, |ui| {
+                let mut on = self.settings.per_app;
+                if theme::toggle(ui, &mut on)
+                    .on_hover_text(self.t("follow_window.hint"))
+                    .changed()
+                {
+                    follow = Some(on);
+                }
+            });
+            let label = self.t("row.active_window");
+            theme::row(ui, &label, |ui| match &last {
+                Some((class, window_title)) => {
+                    ui.label(dim(window_title.chars().take(40).collect::<String>()));
+                    ui.label(class);
+                }
+                None => {
+                    ui.label(dim("—"));
+                }
+            });
+            let label = self.t("row.app_default");
+            theme::row(ui, &label, |ui| {
+                // Index usize::MAX stands for "no preset".
+                let mut options = names.clone();
+                options.push((usize::MAX, self.t("apps.keep")));
+                let current = self
+                    .presets
+                    .app_default
+                    .as_deref()
+                    .and_then(|d| names.iter().find(|(_, n)| n.eq_ignore_ascii_case(d)))
+                    .map_or(usize::MAX, |(j, _)| *j);
+                if let Some(j) = theme::choice(ui, "app-default", current, &options) {
+                    set_default = Some(j);
+                }
+            });
+        });
+        let (title, hint) = (self.t("card.rules"), self.t("card.rules.hint"));
+        theme::group(ui, &title, Some(&hint), |ui| {
+            for (i, rule) in self.presets.apps.iter().enumerate() {
+                let label = if rule.title.is_empty() {
+                    rule.class.clone()
+                } else {
+                    format!("{}  {}", rule.class, rule.title)
+                };
+                theme::row(ui, &label, |ui| {
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text(self.t("delete"))
+                        .clicked()
+                    {
+                        delete = Some(i);
+                    }
+                    let current = names
+                        .iter()
+                        .find(|(_, n)| n.eq_ignore_ascii_case(&rule.preset))
+                        .map_or(usize::MAX, |(j, _)| *j);
+                    if let Some(j) = theme::choice(ui, ("rule", i), current, &names) {
+                        set_preset = Some((i, j));
+                    }
+                });
+            }
+            let label = self.t("apps.new");
+            theme::row(ui, &label, |ui| {
+                let can = !self.new_rule_class.trim().is_empty() && !names.is_empty();
+                add = ui
+                    .add_enabled(can, egui::Button::new(self.t("apps.add")))
+                    .clicked();
+                if let Some(j) = theme::choice(ui, "new-rule", self.new_rule_preset, &names) {
+                    self.new_rule_preset = j;
+                }
+                let hint = self.t("apps.class");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_rule_class)
+                        .hint_text(hint)
+                        .desired_width(230.0),
+                );
+                if let Some((class, _)) = &last
+                    && ui.button(self.t("apps.use_active")).clicked()
+                {
+                    self.new_rule_class = class.clone();
+                }
+            });
+        });
+        if let Some(on) = follow {
+            match desktop::set_window_watch(on) {
+                Ok(()) => {
+                    self.settings.per_app = on;
+                    self.save_settings();
+                }
+                Err(e) => self.message = Some(Message::Error(e.to_string())),
+            }
+        }
+        if let Some((i, j)) = set_preset {
+            self.presets.apps[i].preset = self.presets.list[j].name.clone();
+            self.save_presets();
+        }
+        if let Some(j) = set_default {
+            self.presets.app_default = self.presets.list.get(j).map(|p| p.name.clone());
+            self.save_presets();
+        }
+        if let Some(i) = delete {
+            self.presets.apps.remove(i);
+            self.save_presets();
+        }
+        if add {
+            let preset = self.presets.list[self.new_rule_preset.min(names.len() - 1)]
+                .name
+                .clone();
+            self.presets.apps.push(AppRule {
+                class: self.new_rule_class.trim().to_string(),
+                title: String::new(),
+                preset,
+            });
+            self.new_rule_class.clear();
+            self.save_presets();
+        }
     }
 
     fn page_picture(&mut self, ui: &mut egui::Ui) {

@@ -19,6 +19,8 @@ it. Nothing from Samsung's software is included.
 - **Inputs & audio**: input source, volume, Picture-in-Picture (on/off, size, corner, inputs, sound), OSD language, PC/AV mode.
 - **Presets**: save the current state by name and get back to it with one click, also from the
   tray icon with the window closed. Only the settings that differ are written.
+- **Per application** (KDE Plasma): a preset per window class, applied when that window gets the
+  focus, and one to return to.
 - Every write is read back from the monitor; settings the monitor reports as unavailable (for
   example while Eye Saver is on) are shown as such and never written.
 - English and Italian; the app follows the system language and theme (light or dark, or pick one in Settings).
@@ -137,6 +139,12 @@ The monitor is never polled: each hook writes once.
   `odyssey-ctl-preset@.service` applies the preset named after the instance and
   `odyssey-ctl-night.timer` is an example schedule (copy both to `~/.config/systemd/user/`, then
   `systemctl --user enable --now odyssey-ctl-night.timer`).
+- **Per application (KDE Plasma 6):** in the desktop app, Presets → Per application, switch on
+  *Follow the active window*. It installs a small KWin script that reports the focused window to
+  the app over D-Bus (one call per focus change, no polling). Add a rule per window class (the
+  *Active window* row shows it; `*` and `?` are wildcards) and the preset to apply, and pick the
+  preset to return to when a window without a rule gets the focus. The rules live in
+  `presets.toml` (`[[app]]` and `app_default`).
 - **After suspend:** [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume)
   is a systemd-sleep hook that applies a preset a few seconds after resume, as the user named in
   `/etc/odyssey-ctl/resume.conf`; the comments at the top show how to install it (root).
