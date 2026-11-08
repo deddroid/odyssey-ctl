@@ -128,6 +128,21 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ),
     ("apps.keep", "Leave as it is", "Lascia com'è"),
     (
+        "row.desktop",
+        "Clicking the desktop",
+        "Cliccando sul desktop",
+    ),
+    (
+        "desktop.default",
+        "Back to the no-rule preset",
+        "Torna al preset senza regola",
+    ),
+    (
+        "desktop.keep",
+        "Keep the last rule",
+        "Mantieni l'ultima regola",
+    ),
+    (
         "preset_saved",
         "Preset “{name}” saved.",
         "Preset “{name}” salvato.",

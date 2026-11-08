@@ -132,15 +132,27 @@ fn main() -> eframe::Result {
                         if class == desktop::OWN_WINDOW_CLASS {
                             continue;
                         }
-                        if let Ok(mut last) = shell.last_window.lock() {
-                            *last = Some((class.clone(), title.clone()));
-                        }
-                        if let Some(ctx) = &ctx {
-                            ctx.request_repaint();
-                        }
                         let settings = Settings::load();
                         let presets = preset_logic::Presets::load();
-                        match presets.preset_for_window(&class, &title) {
+                        // An empty class is the desktop: no application has the focus.
+                        let desktop = class.is_empty();
+                        if !desktop {
+                            if let Ok(mut last) = shell.last_window.lock() {
+                                *last = Some((class.clone(), title.clone()));
+                            }
+                            if let Some(ctx) = &ctx {
+                                ctx.request_repaint();
+                            }
+                        }
+                        let target = if desktop {
+                            settings
+                                .desktop_resets
+                                .then_some(presets.app_default.as_deref())
+                                .flatten()
+                        } else {
+                            presets.preset_for_window(&class, &title)
+                        };
+                        match target {
                             Some(name)
                                 if settings.per_app && window_preset.as_deref() != Some(name) =>
                             {

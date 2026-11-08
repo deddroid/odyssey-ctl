@@ -989,8 +989,21 @@ impl App {
                     {
                         continue;
                     }
-                    let text = format!("{class}\n{}", title.chars().take(48).collect::<String>());
-                    let item = egui::Button::new(RichText::new(text).color(p.text))
+                    // The class, and the title of its current window nested under it.
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        class,
+                        0.0,
+                        egui::TextFormat::simple(egui::FontId::proportional(14.0), p.text),
+                    );
+                    if !title.is_empty() {
+                        job.append(
+                            &format!("\n└ {}", title.chars().take(48).collect::<String>()),
+                            0.0,
+                            egui::TextFormat::simple(egui::FontId::proportional(12.0), p.text_dim),
+                        );
+                    }
+                    let item = egui::Button::new(job)
                         .fill(Color32::TRANSPARENT)
                         .corner_radius(egui::CornerRadius::same(12))
                         .min_size(egui::vec2(ui.available_width(), 32.0));
@@ -1073,6 +1086,19 @@ impl App {
                     .map_or(usize::MAX, |(j, _)| *j);
                 if let Some(j) = theme::choice(ui, "app-default", current, &options) {
                     set_default = Some(j);
+                }
+            });
+            let label = self.t("row.desktop");
+            theme::row(ui, &label, |ui| {
+                let options = [
+                    (true, self.t("desktop.default")),
+                    (false, self.t("desktop.keep")),
+                ];
+                if let Some(v) =
+                    theme::choice(ui, "desktop-resets", self.settings.desktop_resets, &options)
+                {
+                    self.settings.desktop_resets = v;
+                    self.save_settings();
                 }
             });
         });

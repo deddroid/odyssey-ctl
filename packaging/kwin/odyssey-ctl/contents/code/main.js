@@ -30,6 +30,11 @@ function reportAll() {
 
 function report(window) {
     reportAll();
+    if (window && window.desktopWindow) {
+        // Clicking the desktop: no application has the focus.
+        callDBus(SERVICE, PATH, SERVICE, "WindowActivated", "", "");
+        return;
+    }
     if (!isApplication(window)) {
         return;
     }
