@@ -47,6 +47,10 @@ pub struct Settings {
     pub start_hidden: bool,
     /// Launched at login (hidden); mirrors the autostart entry.
     pub autostart: bool,
+    /// Apply presets from the per-application rules when the focused window changes (KDE).
+    pub per_app: bool,
+    /// Clicking the desktop applies the no-rule preset (false: the last rule stays).
+    pub desktop_resets: bool,
 }
 
 impl Default for Settings {
@@ -58,6 +62,8 @@ impl Default for Settings {
             close_to_tray: true,
             start_hidden: false,
             autostart: false,
+            per_app: false,
+            desktop_resets: true,
         }
     }
 }
@@ -89,6 +95,7 @@ mod tests {
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), s);
         let partial: Settings = toml::from_str("language = \"en\"").unwrap();
         assert!(!partial.allow_unverified && partial.close_to_tray && !partial.autostart);
+        assert!(!partial.per_app && partial.desktop_resets);
         assert_eq!(partial.theme, ThemeChoice::System);
     }
 }

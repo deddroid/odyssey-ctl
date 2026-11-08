@@ -18,6 +18,8 @@ use crate::i18n::{Lang, tr};
 use crate::settings::{Settings, ThemeChoice};
 use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
+#[cfg(target_os = "linux")]
+use odyssey_ctl::presets::AppRule;
 use odyssey_ctl::presets::{AimSpot, Preset, Presets};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,8 +105,21 @@ pub struct App {
     demo: bool,
     shots: Option<Screenshots>,
     presets: Presets,
-    /// Name typed for a new preset.
-    new_name: String,
+    /// Preset whose name is being edited, with the name it had before.
+    rename: Option<(usize, String)>,
+    /// Preset just added: its name field takes the focus on the next frame.
+    focus_name: Option<usize>,
+    /// Window class picked for a new per-application rule, the preset chosen for it and the
+    /// text typed in the window picker.
+    #[cfg(target_os = "linux")]
+    new_rule_class: String,
+    #[cfg(target_os = "linux")]
+    new_rule_preset: usize,
+    #[cfg(target_os = "linux")]
+    rule_filter: String,
+    /// The window picker is open: its filter field took the focus when it opened.
+    #[cfg(target_os = "linux")]
+    rule_picker_open: bool,
     /// Preset waiting for the second click on "Delete".
     confirm_delete: Option<usize>,
     /// Bus the worker opens (None = the first Samsung monitor).
@@ -168,7 +183,16 @@ impl App {
             demo: std::env::var("ODYSSEY_CTL_DEMO").is_ok_and(|v| v == "1"),
             shots,
             presets: Presets::load(),
-            new_name: String::new(),
+            rename: None,
+            focus_name: None,
+            #[cfg(target_os = "linux")]
+            new_rule_class: String::new(),
+            #[cfg(target_os = "linux")]
+            new_rule_preset: 0,
+            #[cfg(target_os = "linux")]
+            rule_filter: String::new(),
+            #[cfg(target_os = "linux")]
+            rule_picker_open: false,
             confirm_delete: None,
             bus,
             aim_position: None,
@@ -764,83 +788,114 @@ impl App {
     }
 
     fn page_presets(&mut self, ui: &mut egui::Ui) {
-        let (title, hint) = (self.t("card.save_preset"), self.t("card.save_preset.hint"));
-        theme::group(ui, &title, Some(&hint), |ui| {
-            let label = self.t("preset_name");
-            theme::row(ui, &label, |ui| {
-                let name = self.new_name.trim().to_string();
-                let can = !name.is_empty() && !self.values.is_empty() && !self.writing();
-                let save = theme::primary(ui, &self.t("save"));
-                let clicked = ui.add_enabled(can, save).clicked();
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(240.0));
-                if clicked {
-                    let allow = self.settings.allow_unverified;
-                    let values = preset_logic::capture(&self.current_values(), |f| {
-                        f.status.safe_to_write() || allow
-                    });
-                    self.presets.put(Preset {
-                        name: name.clone(),
-                        values,
-                    });
-                    self.save_presets();
-                    self.new_name.clear();
-                    let text = self.t("preset_saved").replace("{name}", &name);
-                    self.message = Some(Message::Info(text, Instant::now()));
-                }
-            });
-        });
-
         let (title, hint) = (self.t("card.presets"), self.t("card.presets.hint"));
         theme::group(ui, &title, Some(&hint), |ui| {
-            if self.presets.list.is_empty() {
-                let label = self.t("presets_empty");
-                theme::row(ui, &label, |_| {});
-                return;
-            }
             let colors = palette(ui);
             let current = self.current_values();
             let mut apply = None;
             let mut overwrite = None;
             let mut delete = None;
-            for (i, p) in self.presets.list.iter().enumerate() {
-                let active = preset_logic::matches(&p.values, &current);
-                theme::row(ui, &p.name, |ui| {
-                    let apply_button = theme::primary(ui, &self.t("apply"));
-                    if ui
-                        .add_enabled(!self.writing() && !self.values.is_empty(), apply_button)
-                        .clicked()
-                    {
-                        apply = Some(i);
-                    }
-                    if ui
-                        .add_enabled(!self.writing(), egui::Button::new(self.t("overwrite")))
-                        .clicked()
-                    {
-                        overwrite = Some(i);
-                    }
-                    let confirming = self.confirm_delete == Some(i);
-                    let text = RichText::new(if confirming {
-                        self.t("confirm_delete")
-                    } else {
-                        self.t("delete")
+            let mut renamed = None;
+            if self.presets.list.is_empty() {
+                let label = self.t("presets_empty");
+                theme::row(ui, &label, |_| {});
+            }
+            for i in 0..self.presets.list.len() {
+                let active = preset_logic::matches(&self.presets.list[i].values, &current);
+                let summary = self.preset_summary(&self.presets.list[i]);
+                // The name is edited in place and committed when the field loses the focus.
+                // It is taken out of `self` so the two row closures do not both borrow it.
+                let mut name = std::mem::take(&mut self.presets.list[i].name);
+                let focus = self.focus_name == Some(i);
+                let (mut gained, mut lost) = (false, false);
+                theme::row_with(
+                    ui,
+                    |ui| {
+                        let field = egui::TextEdit::singleline(&mut name)
+                            .frame(egui::Frame::NONE)
+                            .align(egui::Align2::LEFT_CENTER)
+                            .desired_width(200.0);
+                        let r = ui.add(field);
+                        if focus {
+                            r.request_focus();
+                            select_all(ui, r.id, &name);
+                        }
+                        gained = r.gained_focus();
+                        lost = r.lost_focus();
+                    },
+                    |ui| {
+                        let apply_button = theme::primary(ui, &self.t("apply"));
+                        if ui
+                            .add_enabled(!self.writing() && !self.values.is_empty(), apply_button)
+                            .clicked()
+                        {
+                            apply = Some(i);
+                        }
+                        if ui
+                            .add_enabled(!self.writing(), egui::Button::new(self.t("overwrite")))
+                            .clicked()
+                        {
+                            overwrite = Some(i);
+                        }
+                        let confirming = self.confirm_delete == Some(i);
+                        let text = RichText::new(if confirming {
+                            self.t("confirm_delete")
+                        } else {
+                            self.t("delete")
+                        })
+                        .color(if confirming {
+                            colors.err
+                        } else {
+                            colors.text_dim
+                        });
+                        if ui.button(text).clicked() {
+                            delete = Some(i);
+                        }
+                        ui.label(dim(summary));
+                        if active {
+                            ui.label(
+                                RichText::new(format!("● {}", self.t("active")))
+                                    .small()
+                                    .color(colors.ok),
+                            );
+                        }
+                    },
+                );
+                if focus {
+                    self.focus_name = None;
+                }
+                if gained {
+                    self.rename = Some((i, name.clone()));
+                }
+                self.presets.list[i].name = name;
+                if lost && self.rename.as_ref().is_some_and(|(j, _)| *j == i) {
+                    renamed = self.rename.take();
+                }
+            }
+            let label = self.t("presets.add");
+            let mut add = false;
+            theme::row(ui, &label, |ui| {
+                let button = theme::primary(ui, &self.t("add"));
+                add = ui
+                    .add_enabled(!self.values.is_empty() && !self.writing(), button)
+                    .clicked();
+            });
+            if let Some((i, old)) = renamed {
+                self.commit_rename(i, &old);
+            }
+            if add {
+                let allow = self.settings.allow_unverified;
+                let values = preset_logic::capture(&current, |f| f.status.safe_to_write() || allow);
+                let name = (1..)
+                    .map(|n| {
+                        self.t("presets.default_name")
+                            .replace("{n}", &n.to_string())
                     })
-                    .color(if confirming {
-                        colors.err
-                    } else {
-                        colors.text_dim
-                    });
-                    if ui.button(text).clicked() {
-                        delete = Some(i);
-                    }
-                    ui.label(dim(self.preset_summary(p)));
-                    if active {
-                        ui.label(
-                            RichText::new(format!("● {}", self.t("active")))
-                                .small()
-                                .color(colors.ok),
-                        );
-                    }
-                });
+                    .find(|n| self.presets.find(n).is_none())
+                    .unwrap_or_default();
+                self.presets.list.push(Preset { name, values });
+                self.focus_name = Some(self.presets.list.len() - 1);
+                self.save_presets();
             }
             if let Some(i) = apply {
                 self.apply_preset(i);
@@ -866,6 +921,284 @@ impl App {
                 }
             }
         });
+        #[cfg(target_os = "linux")]
+        self.apps_group(ui);
+    }
+
+    /// Keeps a renamed preset consistent: an empty or duplicate name goes back to `old`, and the
+    /// rules and the fallback that pointed at `old` follow the new name.
+    fn commit_rename(&mut self, i: usize, old: &str) {
+        let new = self.presets.list[i].name.trim().to_string();
+        let taken = self
+            .presets
+            .list
+            .iter()
+            .enumerate()
+            .any(|(j, p)| j != i && p.name.eq_ignore_ascii_case(&new));
+        if new.is_empty() || taken {
+            self.presets.list[i].name = old.to_string();
+            return;
+        }
+        self.presets.list[i].name = new.clone();
+        if new != old {
+            for rule in &mut self.presets.apps {
+                if rule.preset.eq_ignore_ascii_case(old) {
+                    rule.preset = new.clone();
+                }
+            }
+            if self
+                .presets
+                .app_default
+                .as_deref()
+                .is_some_and(|d| d.eq_ignore_ascii_case(old))
+            {
+                self.presets.app_default = Some(new);
+            }
+        }
+        self.save_presets();
+    }
+
+    /// Capsule with the chosen window class that opens the list of open windows, filtered by
+    /// what is typed; when nothing matches, the typed text itself can be used (patterns such
+    /// as `steam_app_*`). Returns the class chosen.
+    #[cfg(target_os = "linux")]
+    fn window_picker(&mut self, ui: &mut egui::Ui, windows: &[(String, String)]) -> Option<String> {
+        use egui::containers::menu::{MenuButton, MenuConfig};
+        let p = palette(ui);
+        let label = if self.new_rule_class.is_empty() {
+            self.t("apps.pick")
+        } else {
+            self.new_rule_class.clone()
+        };
+        let mut chosen = None;
+        let config =
+            MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        let (_, inner) = MenuButton::new(format!("{label}  ⌄"))
+            .config(config)
+            .ui(ui, |ui| {
+                ui.set_width(320.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let hint = self.t("apps.filter");
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut self.rule_filter)
+                        .hint_text(hint)
+                        .align(egui::Align2::LEFT_CENTER)
+                        .margin(egui::Margin::symmetric(10, 6))
+                        .desired_width(300.0),
+                );
+                if !self.rule_picker_open {
+                    // Just opened: type straight away.
+                    self.rule_picker_open = true;
+                    field.request_focus();
+                }
+                let filter = self.rule_filter.trim().to_lowercase();
+                for (class, title) in windows {
+                    if !filter.is_empty()
+                        && !class.to_lowercase().contains(&filter)
+                        && !title.to_lowercase().contains(&filter)
+                    {
+                        continue;
+                    }
+                    // The class, and the title of its current window nested under it.
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        class,
+                        0.0,
+                        egui::TextFormat::simple(egui::FontId::proportional(14.0), p.text),
+                    );
+                    if !title.is_empty() {
+                        job.append(
+                            &format!("\n└ {}", title.chars().take(48).collect::<String>()),
+                            0.0,
+                            egui::TextFormat::simple(egui::FontId::proportional(12.0), p.text_dim),
+                        );
+                    }
+                    let item = egui::Button::new(job)
+                        .fill(Color32::TRANSPARENT)
+                        .corner_radius(egui::CornerRadius::same(12))
+                        .min_size(egui::vec2(ui.available_width(), 32.0));
+                    if ui.add(item).clicked() {
+                        chosen = Some(class.clone());
+                        ui.close();
+                    }
+                }
+                if !filter.is_empty() {
+                    let typed = self.rule_filter.trim().to_string();
+                    let text = self.t("apps.use_text").replace("{text}", &typed);
+                    let item = egui::Button::new(RichText::new(text).color(p.text))
+                        .fill(Color32::TRANSPARENT)
+                        .corner_radius(egui::CornerRadius::same(12))
+                        .min_size(egui::vec2(ui.available_width(), 32.0));
+                    if ui.add(item).clicked() {
+                        chosen = Some(typed);
+                        ui.close();
+                    }
+                }
+            });
+        if inner.is_none() {
+            self.rule_picker_open = false;
+        }
+        if chosen.is_some() {
+            self.rule_filter.clear();
+        }
+        chosen
+    }
+
+    /// Per-application rules: the switch that installs the KWin script, the last window seen,
+    /// one row per rule and a row to add one.
+    #[cfg(target_os = "linux")]
+    fn apps_group(&mut self, ui: &mut egui::Ui) {
+        let (title, hint) = (self.t("card.apps"), self.t("card.apps.hint"));
+        let last = self.shell.last_window.lock().ok().and_then(|l| l.clone());
+        let names: Vec<(usize, String)> = self
+            .presets
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p.name.clone()))
+            .collect();
+        let mut follow = None;
+        let mut set_preset = None;
+        let mut set_default = None;
+        let mut delete = None;
+        let mut add = false;
+        theme::group(ui, &title, Some(&hint), |ui| {
+            let label = self.t("row.follow_window");
+            theme::row(ui, &label, |ui| {
+                let mut on = self.settings.per_app;
+                if theme::toggle(ui, &mut on)
+                    .on_hover_text(self.t("follow_window.hint"))
+                    .changed()
+                {
+                    follow = Some(on);
+                }
+            });
+            let label = self.t("row.active_window");
+            theme::row(ui, &label, |ui| match &last {
+                Some((class, window_title)) => {
+                    ui.label(dim(window_title.chars().take(40).collect::<String>()));
+                    ui.label(class);
+                }
+                None => {
+                    ui.label(dim("—"));
+                }
+            });
+            let label = self.t("row.app_default");
+            theme::row(ui, &label, |ui| {
+                // Index usize::MAX stands for "no preset".
+                let mut options = names.clone();
+                options.push((usize::MAX, self.t("apps.keep")));
+                let current = self
+                    .presets
+                    .app_default
+                    .as_deref()
+                    .and_then(|d| names.iter().find(|(_, n)| n.eq_ignore_ascii_case(d)))
+                    .map_or(usize::MAX, |(j, _)| *j);
+                if let Some(j) = theme::choice(ui, "app-default", current, &options) {
+                    set_default = Some(j);
+                }
+            });
+            let label = self.t("row.desktop");
+            theme::row(ui, &label, |ui| {
+                let options = [
+                    (true, self.t("desktop.default")),
+                    (false, self.t("desktop.keep")),
+                ];
+                if let Some(v) =
+                    theme::choice(ui, "desktop-resets", self.settings.desktop_resets, &options)
+                {
+                    self.settings.desktop_resets = v;
+                    self.save_settings();
+                }
+            });
+        });
+        let (title, hint) = (self.t("card.rules"), self.t("card.rules.hint"));
+        theme::group(ui, &title, Some(&hint), |ui| {
+            for (i, rule) in self.presets.apps.iter().enumerate() {
+                let label = if rule.title.is_empty() {
+                    rule.class.clone()
+                } else {
+                    format!("{}  {}", rule.class, rule.title)
+                };
+                theme::row(ui, &label, |ui| {
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text(self.t("delete"))
+                        .clicked()
+                    {
+                        delete = Some(i);
+                    }
+                    let current = names
+                        .iter()
+                        .find(|(_, n)| n.eq_ignore_ascii_case(&rule.preset))
+                        .map_or(usize::MAX, |(j, _)| *j);
+                    if let Some(j) = theme::choice(ui, ("rule", i), current, &names) {
+                        set_preset = Some((i, j));
+                    }
+                });
+            }
+            let label = self.t("apps.new");
+            let windows = self
+                .shell
+                .open_windows
+                .lock()
+                .ok()
+                .map(|w| w.clone())
+                .unwrap_or_default();
+            theme::row(ui, &label, |ui| {
+                let can = !self.new_rule_class.trim().is_empty() && !names.is_empty();
+                add = ui
+                    .add_enabled(can, egui::Button::new(self.t("apps.add")))
+                    .clicked();
+                if let Some(j) = theme::choice(ui, "new-rule", self.new_rule_preset, &names) {
+                    self.new_rule_preset = j;
+                }
+                if let Some(class) = self.window_picker(ui, &windows) {
+                    self.new_rule_class = class;
+                }
+                if !self.new_rule_class.is_empty()
+                    && ui
+                        .small_button("✕")
+                        .on_hover_text(self.t("delete"))
+                        .clicked()
+                {
+                    self.new_rule_class.clear();
+                }
+            });
+        });
+        if let Some(on) = follow {
+            match desktop::set_window_watch(on) {
+                Ok(()) => {
+                    self.settings.per_app = on;
+                    self.save_settings();
+                }
+                Err(e) => self.message = Some(Message::Error(e.to_string())),
+            }
+        }
+        if let Some((i, j)) = set_preset {
+            self.presets.apps[i].preset = self.presets.list[j].name.clone();
+            self.save_presets();
+        }
+        if let Some(j) = set_default {
+            self.presets.app_default = self.presets.list.get(j).map(|p| p.name.clone());
+            self.save_presets();
+        }
+        if let Some(i) = delete {
+            self.presets.apps.remove(i);
+            self.save_presets();
+        }
+        if add {
+            let preset = self.presets.list[self.new_rule_preset.min(names.len() - 1)]
+                .name
+                .clone();
+            self.presets.apps.push(AppRule {
+                class: self.new_rule_class.trim().to_string(),
+                title: String::new(),
+                preset,
+            });
+            self.new_rule_class.clear();
+            self.save_presets();
+        }
     }
 
     fn page_picture(&mut self, ui: &mut egui::Ui) {
@@ -1077,7 +1410,9 @@ impl App {
             ui.add(
                 egui::TextEdit::singleline(&mut self.aim_name)
                     .hint_text(hint)
-                    .desired_width(110.0),
+                    .align(egui::Align2::LEFT_CENTER)
+                    .margin(egui::Margin::symmetric(10, 6))
+                    .desired_width(130.0),
             );
         });
         if !self.presets.aim.is_empty() {
@@ -1570,6 +1905,17 @@ fn screen_pad(
         x: border.x + (fx * f32::from(border.width)).round() as u16,
         y: border.y + (fy * f32::from(border.height)).round() as u16,
     })
+}
+
+/// Selects the whole text of the text field `id`, so typing replaces it.
+fn select_all(ui: &egui::Ui, id: egui::Id, text: &str) {
+    use egui::text::{CCursor, CCursorRange};
+    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+    state.cursor.set_char_range(Some(CCursorRange::two(
+        CCursor::new(0),
+        CCursor::new(text.chars().count()),
+    )));
+    egui::TextEdit::store_state(ui.ctx(), id, state);
 }
 
 /// The crosshair images in `ED` value order (1..=6), uploaded once.

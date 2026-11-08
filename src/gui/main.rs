@@ -85,6 +85,14 @@ fn main() -> eframe::Result {
     if screenshots.is_none() && !desktop::claim_single_instance(tx.clone()) {
         return Ok(()); // the running instance shows its window
     }
+    if screenshots.is_none() {
+        desktop::spawn_window_service(tx.clone());
+        if settings.per_app
+            && let Err(e) = desktop::set_window_watch(true)
+        {
+            eprintln!("per-application presets: {e}");
+        }
+    }
     let tray =
         screenshots.is_none() && (settings.close_to_tray || settings.start_hidden || args.hidden);
     if tray {
@@ -106,8 +114,59 @@ fn main() -> eframe::Result {
     {
         let shell = shell.clone();
         std::thread::spawn(move || {
+            // Preset last applied for a window, so a focus change inside the same rule is free.
+            #[cfg(target_os = "linux")]
+            let mut window_preset: Option<String> = None;
             for cmd in rx {
                 let ctx = shell.ctx.lock().ok().and_then(|c| c.clone());
+                let cmd = match cmd {
+                    #[cfg(target_os = "linux")]
+                    Cmd::Windows(list) => {
+                        if let Ok(mut open) = shell.open_windows.lock() {
+                            *open = list;
+                        }
+                        if let Some(ctx) = &ctx {
+                            ctx.request_repaint();
+                        }
+                        continue;
+                    }
+                    #[cfg(target_os = "linux")]
+                    Cmd::Window { class, title } => {
+                        if class == desktop::OWN_WINDOW_CLASS {
+                            continue;
+                        }
+                        let settings = Settings::load();
+                        let presets = preset_logic::Presets::load();
+                        // An empty class is the desktop: no application has the focus.
+                        let desktop = class.is_empty();
+                        if !desktop {
+                            if let Ok(mut last) = shell.last_window.lock() {
+                                *last = Some((class.clone(), title.clone()));
+                            }
+                            if let Some(ctx) = &ctx {
+                                ctx.request_repaint();
+                            }
+                        }
+                        let target = if desktop {
+                            settings
+                                .desktop_resets
+                                .then_some(presets.app_default.as_deref())
+                                .flatten()
+                        } else {
+                            presets.preset_for_window(&class, &title)
+                        };
+                        match target {
+                            Some(name)
+                                if settings.per_app && window_preset.as_deref() != Some(name) =>
+                            {
+                                window_preset = Some(name.to_string());
+                                Cmd::Preset(name.to_string())
+                            }
+                            _ => continue,
+                        }
+                    }
+                    other => other,
+                };
                 match (cmd, ctx) {
                     (Cmd::Show, Some(ctx)) => {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -123,6 +182,8 @@ fn main() -> eframe::Result {
                         }
                         ctx.request_repaint();
                     }
+                    #[cfg(target_os = "linux")]
+                    (Cmd::Window { .. } | Cmd::Windows(_), _) => unreachable!("handled above"),
                     (cmd, None) => {
                         if main_tx.send(cmd).is_err() {
                             return;
@@ -152,6 +213,8 @@ fn main() -> eframe::Result {
         match main_rx.recv() {
             Ok(Cmd::Show) => visible = true,
             Ok(Cmd::Preset(name)) => apply_preset_headless(args.bus, &name),
+            #[cfg(target_os = "linux")]
+            Ok(Cmd::Window { .. } | Cmd::Windows(_)) => {}
             Ok(Cmd::Quit) | Err(_) => return Ok(()),
         }
     }

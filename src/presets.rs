@@ -141,6 +141,16 @@ pub struct AimSpot {
     pub y: u16,
 }
 
+/// A per-application rule: when a window whose class (and title, when given) matches gets the
+/// focus, `preset` is applied. Patterns are case-insensitive globs with `*` and `?`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppRule {
+    pub class: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    pub preset: String,
+}
+
 /// `<config dir>/odyssey-ctl/presets.toml`, shared by the GUI, the tray and the command line.
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Presets {
@@ -148,6 +158,28 @@ pub struct Presets {
     pub list: Vec<Preset>,
     #[serde(default, rename = "aim")]
     pub aim: Vec<AimSpot>,
+    /// Checked in order: the first rule that matches wins, so a `*` rule goes last.
+    #[serde(default, rename = "app")]
+    pub apps: Vec<AppRule>,
+    /// Preset applied when the focused window matches no rule (back to normal after a game).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_default: Option<String>,
+}
+
+/// Case-insensitive glob: `*` matches any run of characters, `?` one character.
+pub fn glob_matches(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match (p.first(), t.first()) {
+            (None, None) => true,
+            (Some('*'), _) => go(&p[1..], t) || (!t.is_empty() && go(p, &t[1..])),
+            (Some('?'), Some(_)) => go(&p[1..], &t[1..]),
+            (Some(a), Some(b)) if a == b => go(&p[1..], &t[1..]),
+            _ => false,
+        }
+    }
+    let p: Vec<char> = pattern.to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    go(&p, &t)
 }
 
 impl Presets {
@@ -162,6 +194,18 @@ impl Presets {
     /// The preset called `name` (case-insensitive).
     pub fn find(&self, name: &str) -> Option<&Preset> {
         self.list.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The preset of the first rule matching a window's class and title, else `app_default`.
+    pub fn preset_for_window(&self, class: &str, title: &str) -> Option<&str> {
+        self.apps
+            .iter()
+            .find(|r| {
+                glob_matches(&r.class, class)
+                    && (r.title.is_empty() || glob_matches(&r.title, title))
+            })
+            .map(|r| r.preset.as_str())
+            .or(self.app_default.as_deref())
     }
 
     /// Adds a preset, or replaces the one with the same name (case-insensitive).
@@ -279,9 +323,20 @@ mod tests {
         assert_eq!(p.aim[0].y, 210);
         assert_eq!(p.find("notte").map(|x| x.name.as_str()), Some("Notte"));
         assert!(p.find("night").is_none());
+        p.apps.push(AppRule {
+            class: "steam_app_*".into(),
+            title: String::new(),
+            preset: "FPS".into(),
+        });
+        p.apps.push(AppRule {
+            class: "*".into(),
+            title: String::new(),
+            preset: "Notte".into(),
+        });
         let text = toml::to_string(&p).unwrap();
         assert!(text.contains("[[preset]]") && text.contains("name = \"Notte\""));
         assert!(text.contains("[[aim]]"));
+        assert!(text.contains("[[app]]") && !text.contains("title ="));
         assert_eq!(toml::from_str::<Presets>(&text).unwrap(), p);
         // Files from 0.1.0 have no [[aim]] table.
         assert!(
@@ -290,5 +345,39 @@ mod tests {
                 .aim
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn globs_and_window_rules() {
+        assert!(glob_matches("steam_app_*", "Steam_App_730"));
+        assert!(glob_matches("*", ""));
+        assert!(glob_matches("cs?", "cs2"));
+        assert!(!glob_matches("cs?", "cs"));
+        assert!(!glob_matches("firefox", "firefox-nightly"));
+        assert!(glob_matches("*fox*", "org.mozilla.firefox"));
+        let mut p = Presets::default();
+        assert_eq!(p.preset_for_window("cs2", ""), None);
+        p.apps = vec![
+            AppRule {
+                class: "cs2".into(),
+                title: "*Counter-Strike*".into(),
+                preset: "FPS".into(),
+            },
+            AppRule {
+                class: "*".into(),
+                title: String::new(),
+                preset: "Desk".into(),
+            },
+        ];
+        assert_eq!(p.preset_for_window("cs2", "Counter-Strike 2"), Some("FPS"));
+        assert_eq!(p.preset_for_window("cs2", "Launcher"), Some("Desk"));
+        assert_eq!(p.preset_for_window("kate", ""), Some("Desk"));
+        p.apps.pop();
+        assert_eq!(p.preset_for_window("kate", ""), None);
+        p.app_default = Some("Desk".into());
+        assert_eq!(p.preset_for_window("kate", ""), Some("Desk"));
+        let text = toml::to_string(&p).unwrap();
+        assert!(text.contains("app_default = \"Desk\""));
+        assert_eq!(toml::from_str::<Presets>(&text).unwrap(), p);
     }
 }

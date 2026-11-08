@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Per-application presets on KDE Plasma 6: Presets → Per application installs a KWin script
+  that reports the focused window to the app over D-Bus; rules match the window class (and
+  optionally the title) with `*`/`?` wildcards, and a fallback preset is applied when a window
+  without a rule gets the focus (and, by choice, when the desktop is clicked). Stored in
+  `presets.toml` as `[[app]]` and `app_default`.
+- Presets page: "Add" creates a preset from the current settings and lets you type its name in
+  place; names can be renamed in place (rules follow the new name).
 - `odyssey-ctl preset list|save|apply`: the presets of `presets.toml` from the command line, the
   same file the desktop app and its tray menu use. `apply` exits with 1 when a write fails, so
   scripts can tell.

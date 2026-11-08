@@ -19,13 +19,22 @@ pub const ICON_PNG: &[u8] = include_bytes!("../../assets/icon-256.png");
 /// Tray icon (embedded PNG).
 const TRAY_PNG: &[u8] = include_bytes!("../../assets/icon-64.png");
 
-/// Commands coming from the tray or from a second instance.
+/// Commands coming from the tray, from a second instance or from the window manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cmd {
     Show,
     Quit,
     /// Apply the preset with this name.
     Preset(String),
+    /// A window got the focus (class and title), reported by the KWin script.
+    #[cfg(target_os = "linux")]
+    Window {
+        class: String,
+        title: String,
+    },
+    /// The application windows open right now (class and title), one entry per class.
+    #[cfg(target_os = "linux")]
+    Windows(Vec<(String, String)>),
 }
 
 /// Menu labels in the user's language.
@@ -46,7 +55,22 @@ pub struct Shell {
     pub quit: AtomicBool,
     /// Presets chosen from the tray while the window is open; the window applies them.
     pub preset_requests: Mutex<Vec<String>>,
+    /// Class and title of the last application window that got the focus (not this one).
+    #[cfg(target_os = "linux")]
+    pub last_window: Mutex<Option<(String, String)>>,
+    /// Application windows open right now, one per class, for the rule picker.
+    #[cfg(target_os = "linux")]
+    pub open_windows: Mutex<Vec<(String, String)>>,
 }
+
+/// D-Bus name, object path and interface of the window service the KWin script calls.
+#[cfg(target_os = "linux")]
+pub const WINDOW_SERVICE: &str = "io.github.deddroid.OdysseyCtl";
+#[cfg(target_os = "linux")]
+pub const WINDOW_PATH: &str = "/io/github/deddroid/OdysseyCtl";
+/// Window class of this application, as the compositor reports it.
+#[cfg(target_os = "linux")]
+pub const OWN_WINDOW_CLASS: &str = "odyssey-ctl";
 
 /// RGBA pixels of an embedded PNG.
 pub fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
@@ -214,6 +238,151 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
             });
         })
         .ok();
+}
+
+// ---- active window (KDE Plasma) -----------------------------------------------
+
+/// Serves `WindowActivated(class, title)` on the session bus; the KWin script calls it on every
+/// focus change. Fails silently without a session bus (the feature is then unavailable).
+#[cfg(target_os = "linux")]
+pub fn spawn_window_service(tx: Sender<Cmd>) {
+    struct Service {
+        tx: Sender<Cmd>,
+    }
+
+    #[zbus::interface(name = "io.github.deddroid.OdysseyCtl")]
+    impl Service {
+        fn window_activated(&self, class: String, title: String) {
+            // The receiver only disappears at shutdown.
+            let _ = self.tx.send(Cmd::Window { class, title });
+        }
+
+        /// One window per line as `class<US>title` (see the KWin script).
+        fn windows(&self, list: String) {
+            let windows = list
+                .lines()
+                .filter_map(|l| l.split_once('\u{1f}'))
+                .map(|(c, t)| (c.to_string(), t.to_string()))
+                .collect();
+            let _ = self.tx.send(Cmd::Windows(windows));
+        }
+    }
+
+    std::thread::Builder::new()
+        .name("odyssey-window-service".into())
+        .spawn(move || {
+            let connection = zbus::blocking::connection::Builder::session()
+                .and_then(|b| b.name(WINDOW_SERVICE))
+                .and_then(|b| b.serve_at(WINDOW_PATH, Service { tx }))
+                .and_then(|b| b.build());
+            match connection {
+                Ok(_connection) => loop {
+                    std::thread::park();
+                },
+                Err(e) => eprintln!("window service unavailable: {e}"),
+            }
+        })
+        .ok();
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn spawn_window_service(_tx: Sender<Cmd>) {}
+
+#[cfg(target_os = "linux")]
+const KWIN_SCRIPT_ID: &str = "odyssey-ctl";
+#[cfg(target_os = "linux")]
+const KWIN_METADATA: &str = include_str!("../../packaging/kwin/odyssey-ctl/metadata.json");
+#[cfg(target_os = "linux")]
+const KWIN_MAIN_JS: &str = include_str!("../../packaging/kwin/odyssey-ctl/contents/code/main.js");
+
+/// Installs (or removes) the KWin script under `~/.local/share/kwin/scripts/` and switches it on
+/// (or off) in `kwinrc`, then asks KWin to reload its configuration.
+#[cfg(target_os = "linux")]
+pub fn set_window_watch(enabled: bool) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    let dir = dirs::data_dir()
+        .ok_or_else(|| Error::other("no data directory"))?
+        .join("kwin/scripts")
+        .join(KWIN_SCRIPT_ID);
+    if enabled {
+        let changed = write_if_changed(&dir.join("metadata.json"), KWIN_METADATA)?
+            | write_if_changed(&dir.join("contents/code/main.js"), KWIN_MAIN_JS)?;
+        if changed {
+            // KWin keeps running the old copy until the script is unloaded; `reconfigure`
+            // below loads the new one.
+            kwin_unload_script()?;
+        }
+        kwin_plugin(true)
+    } else {
+        kwin_plugin(false)?;
+        match std::fs::remove_dir_all(&dir) {
+            Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_window_watch(_enabled: bool) -> std::io::Result<()> {
+    Err(std::io::Error::other(
+        "per-application presets need KDE Plasma",
+    ))
+}
+
+/// Writes `content` unless the file already holds it; true when it was written.
+#[cfg(target_os = "linux")]
+fn write_if_changed(path: &std::path::Path, content: &str) -> std::io::Result<bool> {
+    if std::fs::read_to_string(path).is_ok_and(|current| current == content) {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)?;
+    Ok(true)
+}
+
+/// `org.kde.kwin.Scripting.unloadScript`: stops the running copy of the script.
+#[cfg(target_os = "linux")]
+fn kwin_unload_script() -> std::io::Result<()> {
+    use std::io::Error;
+    let connection = zbus::blocking::Connection::session().map_err(Error::other)?;
+    connection
+        .call_method(
+            Some("org.kde.KWin"),
+            "/Scripting",
+            Some("org.kde.kwin.Scripting"),
+            "unloadScript",
+            &(KWIN_SCRIPT_ID,),
+        )
+        .map_err(|e| Error::other(format!("KWin did not unload the script: {e}")))?;
+    Ok(())
+}
+
+/// `kwinrc [Plugins] odyssey-ctlEnabled=<enabled>`, then `org.kde.KWin.reconfigure`.
+#[cfg(target_os = "linux")]
+fn kwin_plugin(enabled: bool) -> std::io::Result<()> {
+    use std::io::Error;
+    let status = std::process::Command::new("kwriteconfig6")
+        .args(["--file", "kwinrc", "--group", "Plugins", "--key"])
+        .arg(format!("{KWIN_SCRIPT_ID}Enabled"))
+        .arg(if enabled { "true" } else { "false" })
+        .status()
+        .map_err(|e| Error::other(format!("kwriteconfig6: {e} (is this KDE Plasma 6?)")))?;
+    if !status.success() {
+        return Err(Error::other(format!("kwriteconfig6 exited with {status}")));
+    }
+    let connection = zbus::blocking::Connection::session().map_err(Error::other)?;
+    connection
+        .call_method(
+            Some("org.kde.KWin"),
+            "/KWin",
+            Some("org.kde.KWin"),
+            "reconfigure",
+            &(),
+        )
+        .map_err(|e| Error::other(format!("KWin did not reload its configuration: {e}")))?;
+    Ok(())
 }
 
 // ---- tray: Windows -----------------------------------------------------------

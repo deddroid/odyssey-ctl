@@ -23,6 +23,7 @@ toml = "1.2.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", optional = true }
+zbus = { version = "5", default-features = false, features = ["tokio", "blocking-api"], optional = true }
 libc = "0.2.191"
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"], optional = true }
 
@@ -41,6 +42,7 @@ gui = [
     "dep:image",
     "dep:interprocess",
     "dep:ksni",
+    "dep:zbus",
     "dep:tokio",
     "dep:tray-icon",
     "dep:windows-sys",

@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Email": "deddo9412@gmail.com", "Name": "deddroid" }],
+        "Description": "Reports the active window to Odyssey Control so it can apply per-application presets",
+        "Description[it]": "Comunica la finestra attiva a Odyssey Control per applicare i preset per applicazione",
+        "Icon": "odyssey-ctl",
+        "Id": "odyssey-ctl",
+        "License": "MIT",
+        "Name": "Odyssey Control",
+        "Version": "1"
+    },
+    "X-Plasma-API": "javascript"
+}
