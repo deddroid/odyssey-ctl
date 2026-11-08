@@ -110,8 +110,12 @@ odyssey-ctl info                      # capability string e profilo firmware
 odyssey-ctl get                       # tutte le voci conosciute
 odyssey-ctl get brightness picture-mode
 odyssey-ctl set brightness 40
+odyssey-ctl set brightness +5         # passo relativo, entro i limiti del monitor
 odyssey-ctl set picture-mode fps --unverified
 odyssey-ctl set lighting-effect static
+odyssey-ctl preset list               # presets.toml, condiviso con l'app desktop
+odyssey-ctl preset save Scrivania     # le impostazioni attuali del monitor, con un nome
+odyssey-ctl preset apply Notte        # scrive solo ciò che differisce; esce con 1 se una scrittura fallisce
 odyssey-ctl features                  # nomi, codici VCP e stato di verifica
 odyssey-ctl sdm on                    # profilo esteso Samsung (EB=A1); 'off' per tornare
 odyssey-ctl raw get 2f                # qualsiasi codice VCP
@@ -119,6 +123,28 @@ odyssey-ctl raw set 2f 6
 ```
 
 Con più monitor collegati, `--bus N` sceglie quale usare.
+
+### Automazioni
+
+Tutto quello che segue chiama solo lo strumento a riga di comando, quindi funziona ovunque si
+possa eseguire un comando. Il monitor non viene mai interrogato in continuazione: ogni gancio
+scrive una volta sola.
+
+- **Scorciatoie da tastiera (KDE):** Impostazioni di sistema → Scorciatoie → Aggiungi nuova →
+  Comando o script, con `odyssey-ctl set brightness +5` (e `-5`), oppure
+  `odyssey-ctl preset apply Notte`.
+- **Giochi:** opzioni di avvio di Steam
+  `odyssey-ctl preset apply FPS; %command%; odyssey-ctl preset apply Scrivania`, oppure con
+  [GameMode](https://github.com/FeralInteractive/gamemode) in `~/.config/gamemode.ini`:
+  `start=odyssey-ctl preset apply FPS` e `end=odyssey-ctl preset apply Scrivania` sotto `[custom]`.
+- **Orari fissi:** le unità utente in [`packaging/systemd/`](packaging/systemd/):
+  `odyssey-ctl-preset@.service` applica il preset con il nome dell'istanza e
+  `odyssey-ctl-night.timer` è un esempio di orario (copia entrambi in `~/.config/systemd/user/`,
+  poi `systemctl --user enable --now odyssey-ctl-night.timer`).
+- **Al ripristino dalla sospensione:**
+  [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume) è un gancio di
+  systemd-sleep che applica un preset qualche secondo dopo il ripristino, come l'utente indicato in
+  `/etc/odyssey-ctl/resume.conf`; i commenti in testa spiegano come installarlo (root).
 
 ### Variabili d'ambiente
 

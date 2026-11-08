@@ -9,7 +9,6 @@
 mod app;
 mod desktop;
 mod i18n;
-mod presets;
 mod settings;
 mod theme;
 mod worker;
@@ -54,7 +53,7 @@ fn native_options() -> eframe::NativeOptions {
 
 /// Applies a preset chosen from the tray while no window is open.
 fn apply_preset_headless(bus: Option<u32>, name: &str) {
-    let Some(preset) = presets::Presets::load()
+    let Some(preset) = preset_logic::Presets::load()
         .list
         .into_iter()
         .find(|p| p.name == name)

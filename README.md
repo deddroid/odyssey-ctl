@@ -108,8 +108,12 @@ odyssey-ctl info                      # capability string and firmware profile
 odyssey-ctl get                       # every known setting
 odyssey-ctl get brightness picture-mode
 odyssey-ctl set brightness 40
+odyssey-ctl set brightness +5         # relative step, kept within the monitor's range
 odyssey-ctl set picture-mode fps --unverified
 odyssey-ctl set lighting-effect static
+odyssey-ctl preset list               # presets.toml, shared with the desktop app
+odyssey-ctl preset save Desk          # the monitor's current settings, by name
+odyssey-ctl preset apply Night        # writes only what differs; exit code 1 if a write fails
 odyssey-ctl features                  # names, VCP codes and verification status
 odyssey-ctl sdm on                    # Samsung extended profile (EB=A1); 'off' to return
 odyssey-ctl raw get 2f                # any VCP code
@@ -117,6 +121,25 @@ odyssey-ctl raw set 2f 6
 ```
 
 Use `--bus N` to pick a monitor when more than one is connected.
+
+### Automation
+
+Everything below only calls the command line tool, so it works wherever a command can be run.
+The monitor is never polled: each hook writes once.
+
+- **Keyboard shortcuts (KDE):** System Settings → Shortcuts → Add new → Command or script, with
+  `odyssey-ctl set brightness +5` (and `-5`), or `odyssey-ctl preset apply Night`.
+- **Games:** Steam launch options
+  `odyssey-ctl preset apply FPS; %command%; odyssey-ctl preset apply Desk`, or with
+  [GameMode](https://github.com/FeralInteractive/gamemode) in `~/.config/gamemode.ini`:
+  `start=odyssey-ctl preset apply FPS` and `end=odyssey-ctl preset apply Desk` under `[custom]`.
+- **Fixed times:** the user units in [`packaging/systemd/`](packaging/systemd/):
+  `odyssey-ctl-preset@.service` applies the preset named after the instance and
+  `odyssey-ctl-night.timer` is an example schedule (copy both to `~/.config/systemd/user/`, then
+  `systemctl --user enable --now odyssey-ctl-night.timer`).
+- **After suspend:** [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume)
+  is a systemd-sleep hook that applies a preset a few seconds after resume, as the user named in
+  `/etc/odyssey-ctl/resume.conf`; the comments at the top show how to install it (root).
 
 ### Environment variables
 

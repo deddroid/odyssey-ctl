@@ -15,10 +15,10 @@ use odyssey_ctl::pip::{self, Channel, Source};
 use odyssey_ctl::presets as preset_logic;
 
 use crate::i18n::{Lang, tr};
-use crate::presets::{AimSpot, Preset, Presets};
 use crate::settings::{Settings, ThemeChoice};
 use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
+use odyssey_ctl::presets::{AimSpot, Preset, Presets};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {

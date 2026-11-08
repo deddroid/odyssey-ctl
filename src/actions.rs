@@ -98,6 +98,27 @@ pub fn write(
     write_from(m, f, before, target)
 }
 
+/// Writes the current value plus `delta`, kept between 0 and the monitor's maximum
+/// (`set brightness +5`). A value already at the limit is left alone.
+pub fn adjust(
+    m: &mut dyn Vcp,
+    f: &Feature,
+    delta: i32,
+    allow_unverified: bool,
+) -> Result<Change, Error> {
+    check_policy(f, allow_unverified)?;
+    let before = m.get_vcp(f.code)?;
+    let now = i32::from(features::state(f, before.current));
+    let target = (now + delta).clamp(0, i32::from(before.max)) as u16;
+    if target == now as u16 {
+        return Ok(Change {
+            before: before.current,
+            after: before.current,
+        });
+    }
+    write_from(m, f, before, target)
+}
+
 fn check_policy(f: &Feature, allow_unverified: bool) -> Result<(), Error> {
     if f.read_only {
         return Err(Error::Other(format!(
@@ -389,6 +410,17 @@ mod tests {
         assert!(write(&mut d, find("pip-sound").unwrap(), 1, false).is_err());
         assert!(write(&mut d, find("pip-sound").unwrap(), 1, true).is_ok());
         assert!(write(&mut d, find("pip-source").unwrap(), 0, true).is_err());
+    }
+
+    #[test]
+    fn adjust_is_relative_and_clamped() {
+        let mut d = DemoDevice::new();
+        let be = find("black-equalizer").unwrap(); // 6 of 10 in the demo snapshot
+        assert_eq!(adjust(&mut d, be, -2, false).unwrap().after, 4);
+        assert_eq!(adjust(&mut d, be, 50, false).unwrap().after, 10);
+        let same = adjust(&mut d, be, 1, false).unwrap();
+        assert_eq!((same.before, same.after), (10, 10));
+        assert_eq!(adjust(&mut d, be, -99, false).unwrap().after, 0);
     }
 
     #[test]
