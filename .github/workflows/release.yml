@@ -36,8 +36,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           name=odyssey-ctl-${GITHUB_REF_NAME#v}-${{ matrix.target }}
-          mkdir -p "$name/icons"
+          mkdir -p "$name/icons" "$name/systemd"
           cp target/release/odyssey-ctl target/release/odyssey-ctl-gui "$name/"
+          cp packaging/systemd/* "$name/systemd/"
           cp LICENSE README.md README.it.md CHANGELOG.md install.sh "$name/"
           cp packaging/linux/70-odyssey-ctl.rules packaging/linux/odyssey-ctl.conf packaging/linux/odyssey-ctl.desktop "$name/"
           cp assets/icon.svg assets/icon-*.png "$name/icons/"

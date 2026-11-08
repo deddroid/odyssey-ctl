@@ -1,0 +1,13 @@
+# Example timer: apply the preset "Night" at 21:00 every day (see odyssey-ctl-preset@.service).
+# Copy it under another name, change OnCalendar and the preset in Unit= to add more schedules;
+# `systemd-analyze calendar "Mon..Fri 08:00"` checks a calendar expression.
+[Unit]
+Description=Apply the odyssey-ctl preset "Night" every evening
+
+[Timer]
+OnCalendar=*-*-* 21:00:00
+Persistent=true
+Unit=odyssey-ctl-preset@Night.service
+
+[Install]
+WantedBy=timers.target

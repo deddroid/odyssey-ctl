@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand};
 use odyssey_ctl::actions::{self, open};
 use odyssey_ctl::caps::Capabilities;
 use odyssey_ctl::device::{Error, Vcp};
-use odyssey_ctl::features::{self, FEATURES, Feature, parse_number};
+use odyssey_ctl::features::{self, FEATURES, Feature, parse_number, parse_relative};
+use odyssey_ctl::presets::{self, Preset, Presets};
 use odyssey_ctl::{SDM_DISABLE, SDM_ENABLE, aim, pip};
 
 #[derive(Parser)]
@@ -29,8 +30,16 @@ enum Command {
     Info,
     /// Read features (all known features when none is given).
     Get { features: Vec<String> },
-    /// Write a feature. The value is a number or one of the names shown by `features`.
-    Set { feature: String, value: String },
+    /// Write a feature. The value is a number, one of the names shown by `features`, or a
+    /// relative step such as +5 or -5.
+    Set {
+        feature: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+    /// Presets saved in presets.toml, shared with the desktop app and its tray menu.
+    #[command(subcommand)]
+    Preset(PresetCmd),
     /// List known features and actions with their verification status.
     Features,
     /// Virtual Aim Point placement (choose an icon with `set aim-point` first).
@@ -54,6 +63,16 @@ enum Command {
     /// Low-level access by VCP code.
     #[command(subcommand)]
     Raw(Raw),
+}
+
+#[derive(Subcommand)]
+enum PresetCmd {
+    /// List the saved presets.
+    List,
+    /// Save the monitor's current settings under this name (replaces a preset with the same name).
+    Save { name: String },
+    /// Apply a preset, writing only the settings that differ from the monitor.
+    Apply { name: String },
 }
 
 #[derive(Subcommand)]
@@ -141,6 +160,16 @@ fn run(cli: Cli) -> Result<(), Error> {
         Command::Get { features } => get(&mut *open(cli.bus)?.monitor, &features),
         Command::Set { feature, value } => {
             set(&mut *open(cli.bus)?.monitor, &feature, &value, allow)
+        }
+        Command::Preset(PresetCmd::List) => {
+            preset_list();
+            Ok(())
+        }
+        Command::Preset(PresetCmd::Save { name }) => {
+            preset_save(&mut *open(cli.bus)?.monitor, &name, allow)
+        }
+        Command::Preset(PresetCmd::Apply { name }) => {
+            preset_apply(&mut *open(cli.bus)?.monitor, &name, allow)
         }
         Command::Aim(cmd) => aim_cmd(&mut *open(cli.bus)?.monitor, cmd, allow),
         Command::Pip(cmd) => pip_cmd(&mut *open(cli.bus)?.monitor, cmd, allow),
@@ -350,10 +379,15 @@ fn get(m: &mut dyn Vcp, names: &[String]) -> Result<(), Error> {
 
 fn set(m: &mut dyn Vcp, name: &str, value: &str, unverified: bool) -> Result<(), Error> {
     let f = feature(name)?;
-    let target = f
-        .parse_value(value)
-        .ok_or_else(|| Error::Other(format!("invalid value '{value}' for {}", f.name)))?;
-    let c = actions::write(m, f, target, unverified)?;
+    let c = match parse_relative(value) {
+        Some(delta) => actions::adjust(m, f, delta, unverified)?,
+        None => {
+            let target = f
+                .parse_value(value)
+                .ok_or_else(|| Error::Other(format!("invalid value '{value}' for {}", f.name)))?;
+            actions::write(m, f, target, unverified)?
+        }
+    };
     println!(
         "{}: {} -> {}",
         f.name,
@@ -361,6 +395,76 @@ fn set(m: &mut dyn Vcp, name: &str, value: &str, unverified: bool) -> Result<(),
         describe(f, c.after)
     );
     Ok(())
+}
+
+fn preset_list() {
+    let presets = Presets::load();
+    if presets.list.is_empty() {
+        println!("no presets (save one with `preset save <name>` or from the desktop app)");
+    }
+    for p in &presets.list {
+        let mode = features::find("picture-mode")
+            .zip(p.values.get("picture-mode"))
+            .and_then(|(f, &v)| f.value_name(v))
+            .map(|n| format!(" (picture mode {n})"))
+            .unwrap_or_default();
+        println!("{:<20} {} settings{mode}", p.name, p.values.len());
+    }
+}
+
+fn preset_save(m: &mut dyn Vcp, name: &str, unverified: bool) -> Result<(), Error> {
+    let readings = actions::read(m, &FEATURES.iter().collect::<Vec<_>>())?;
+    let current = readings
+        .into_iter()
+        .filter_map(|r| Some((r.feature.code, r.value.ok()?)))
+        .collect();
+    let values = presets::capture(&current, |f| f.status.safe_to_write() || unverified);
+    if values.is_empty() {
+        return Err(Error::Other(
+            "nothing to save: no writable setting was read".into(),
+        ));
+    }
+    let mut presets = Presets::load();
+    presets.put(Preset {
+        name: name.to_string(),
+        values,
+    });
+    presets.save().map_err(Error::Io)?;
+    let saved = presets.find(name).map_or(0, |p| p.values.len());
+    println!("preset '{name}' saved with {saved} settings");
+    Ok(())
+}
+
+fn preset_apply(m: &mut dyn Vcp, name: &str, unverified: bool) -> Result<(), Error> {
+    let presets = Presets::load();
+    let preset = presets
+        .find(name)
+        .ok_or_else(|| Error::Other(format!("no preset called '{name}' (see `preset list`)")))?;
+    let report = presets::apply(m, &preset.values, unverified);
+    for f in &report.changed {
+        println!("{:<16} written", f.name);
+    }
+    for f in &report.skipped {
+        println!("{:<16} skipped (locked or disabled now)", f.name);
+    }
+    for (f, e) in &report.failed {
+        println!("{:<16} failed: {e}", f.name);
+    }
+    println!(
+        "preset '{}': {} written, {} unchanged or skipped, {} failed",
+        preset.name,
+        report.changed.len(),
+        preset.values.len() - report.changed.len() - report.failed.len(),
+        report.failed.len()
+    );
+    if report.failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Other(format!(
+            "{} setting(s) could not be written",
+            report.failed.len()
+        )))
+    }
 }
 
 fn sdm(m: &mut dyn Vcp, on: bool) -> Result<(), Error> {

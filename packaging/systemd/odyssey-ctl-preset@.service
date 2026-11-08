@@ -1,0 +1,13 @@
+# Applies an odyssey-ctl preset once; the instance name is the preset name.
+# Install for your user and run on demand or from a timer:
+#   mkdir -p ~/.config/systemd/user
+#   cp odyssey-ctl-preset@.service odyssey-ctl-night.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user start odyssey-ctl-preset@Night.service      # apply "Night" now
+#   systemctl --user enable --now odyssey-ctl-night.timer         # and every evening
+[Unit]
+Description=Apply the odyssey-ctl preset "%I"
+
+[Service]
+Type=oneshot
+ExecStart=odyssey-ctl preset apply "%I"

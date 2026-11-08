@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::actions;
+use crate::config::{load_toml, save_toml};
 use crate::ddc::VcpValue;
 use crate::device::Vcp;
 use crate::features::{self, Feature};
@@ -118,6 +121,74 @@ pub fn apply(m: &mut dyn Vcp, target: &Values, allow_unverified: bool) -> Report
     report
 }
 
+// ---- the presets file -------------------------------------------------------
+
+const FILE: &str = "presets.toml";
+
+/// A named preset as stored in `presets.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Preset {
+    pub name: String,
+    /// Feature name -> value, as in `odyssey-ctl features`.
+    pub values: Values,
+}
+
+/// A saved crosshair position (firmware units, see [`crate::aim`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimSpot {
+    pub name: String,
+    pub x: u16,
+    pub y: u16,
+}
+
+/// `<config dir>/odyssey-ctl/presets.toml`, shared by the GUI, the tray and the command line.
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Presets {
+    #[serde(default, rename = "preset")]
+    pub list: Vec<Preset>,
+    #[serde(default, rename = "aim")]
+    pub aim: Vec<AimSpot>,
+}
+
+impl Presets {
+    pub fn load() -> Self {
+        load_toml(FILE)
+    }
+
+    pub fn save(&self) -> std::io::Result<()> {
+        save_toml(FILE, self)
+    }
+
+    /// The preset called `name` (case-insensitive).
+    pub fn find(&self, name: &str) -> Option<&Preset> {
+        self.list.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Adds a preset, or replaces the one with the same name (case-insensitive).
+    pub fn put(&mut self, preset: Preset) {
+        match self
+            .list
+            .iter_mut()
+            .find(|p| p.name.eq_ignore_ascii_case(&preset.name))
+        {
+            Some(existing) => *existing = preset,
+            None => self.list.push(preset),
+        }
+    }
+
+    /// Adds a crosshair position, or replaces the one with the same name (case-insensitive).
+    pub fn put_aim(&mut self, spot: AimSpot) {
+        match self
+            .aim
+            .iter_mut()
+            .find(|a| a.name.eq_ignore_ascii_case(&spot.name))
+        {
+            Some(existing) => *existing = spot,
+            None => self.aim.push(spot),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +241,54 @@ mod tests {
         assert_eq!(changed, ["brightness", "black-equalizer"]);
         assert!(report.failed.is_empty());
         assert!(matches(&saved, &readings(&mut d)));
+    }
+
+    #[test]
+    fn toml_round_trip_and_put() {
+        let mut p = Presets::default();
+        let values: Values = [
+            ("brightness".to_string(), 30),
+            ("picture-mode".to_string(), 6),
+        ]
+        .into();
+        p.put(Preset {
+            name: "FPS".into(),
+            values: values.clone(),
+        });
+        p.put(Preset {
+            name: "fps".into(),
+            values: [("brightness".to_string(), 40)].into(),
+        });
+        assert_eq!(p.list.len(), 1);
+        assert_eq!(p.list[0].values["brightness"], 40);
+        p.put(Preset {
+            name: "Notte".into(),
+            values,
+        });
+        p.put_aim(AimSpot {
+            name: "Head".into(),
+            x: 849,
+            y: 200,
+        });
+        p.put_aim(AimSpot {
+            name: "head".into(),
+            x: 849,
+            y: 210,
+        });
+        assert_eq!(p.aim.len(), 1);
+        assert_eq!(p.aim[0].y, 210);
+        assert_eq!(p.find("notte").map(|x| x.name.as_str()), Some("Notte"));
+        assert!(p.find("night").is_none());
+        let text = toml::to_string(&p).unwrap();
+        assert!(text.contains("[[preset]]") && text.contains("name = \"Notte\""));
+        assert!(text.contains("[[aim]]"));
+        assert_eq!(toml::from_str::<Presets>(&text).unwrap(), p);
+        // Files from 0.1.0 have no [[aim]] table.
+        assert!(
+            toml::from_str::<Presets>("[[preset]]\nname = \"a\"\n[preset.values]\n")
+                .unwrap()
+                .aim
+                .is_empty()
+        );
     }
 }

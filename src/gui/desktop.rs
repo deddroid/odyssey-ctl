@@ -12,7 +12,7 @@ use std::sync::mpsc::Sender;
 
 use eframe::egui;
 
-use crate::presets::Presets;
+use odyssey_ctl::presets::Presets;
 
 /// Window icon (embedded PNG).
 pub const ICON_PNG: &[u8] = include_bytes!("../../assets/icon-256.png");

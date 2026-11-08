@@ -6,6 +6,7 @@
 pub mod actions;
 pub mod aim;
 pub mod caps;
+pub mod config;
 pub mod ddc;
 pub mod demo;
 pub mod device;

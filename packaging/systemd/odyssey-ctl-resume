@@ -1,0 +1,20 @@
+#!/bin/sh
+# systemd-sleep hook: apply an odyssey-ctl preset after the computer resumes from suspend or
+# hibernation, as the user who owns the preset. Install (root):
+#   install -Dm755 odyssey-ctl-resume /usr/lib/systemd/system-sleep/odyssey-ctl-resume
+#   printf 'USER=%s\nPRESET=%s\n' "$USER" Desk > /etc/odyssey-ctl/resume.conf   # mkdir -p /etc/odyssey-ctl first
+# Optional in resume.conf: DELAY=5 (seconds to wait for the monitor to answer DDC/CI again).
+# Logs go to the journal: journalctl -t odyssey-ctl-resume
+conf=/etc/odyssey-ctl/resume.conf
+[ "$1" = "post" ] || exit 0
+[ -r "$conf" ] || exit 0
+USER= PRESET= DELAY=5
+. "$conf"
+[ -n "$USER" ] && [ -n "$PRESET" ] || exit 0
+# The monitor is busy renegotiating the link right after resume; run in the background so the
+# wait never delays the resume itself.
+(
+    sleep "$DELAY"
+    runuser -u "$USER" -- odyssey-ctl preset apply "$PRESET" 2>&1 | logger -t odyssey-ctl-resume
+) &
+exit 0

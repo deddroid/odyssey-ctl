@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `odyssey-ctl preset list|save|apply`: the presets of `presets.toml` from the command line, the
+  same file the desktop app and its tray menu use. `apply` exits with 1 when a write fails, so
+  scripts can tell.
+- Relative values: `odyssey-ctl set brightness +5` (or `-5`) reads the current value and keeps
+  the result within the monitor's range.
+- Automation templates in `packaging/systemd/`: a user unit that applies a preset by name, an
+  example timer, and a systemd-sleep hook that applies a preset after resume. The README lists
+  the recipes for KDE shortcuts, Steam launch options and GameMode.
+
+### Changed
+- `serde`, `toml` and `dirs` are now always built in (the command line tool reads the presets
+  file); the `gui` feature only adds the desktop app.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

@@ -188,6 +188,16 @@ impl Feature {
     }
 }
 
+/// `+N` / `-N`: a change relative to the current value (a bare number is absolute).
+pub fn parse_relative(s: &str) -> Option<i32> {
+    let (sign, digits) = match s.as_bytes().first()? {
+        b'+' => (1, &s[1..]),
+        b'-' => (-1, &s[1..]),
+        _ => return None,
+    };
+    digits.parse::<u16>().ok().map(|n| sign * i32::from(n))
+}
+
 pub fn parse_number(s: &str) -> Option<u16> {
     match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         Some(hex) => u16::from_str_radix(hex, 16).ok(),
@@ -456,6 +466,10 @@ mod tests {
         assert_eq!(pm.parse_value("FPS"), Some(6));
         assert_eq!(pm.parse_value("0x09"), Some(9));
         assert_eq!(pm.parse_value("nope"), None);
+        assert_eq!(parse_relative("+5"), Some(5));
+        assert_eq!(parse_relative("-12"), Some(-12));
+        assert_eq!(parse_relative("5"), None);
+        assert_eq!(parse_relative("+"), None);
         assert_eq!(by_code(0x2F).unwrap().name, "black-equalizer");
     }
 
