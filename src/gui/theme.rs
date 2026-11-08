@@ -109,7 +109,7 @@ fn visuals(p: &Palette, mut v: egui::Visuals) -> egui::Visuals {
     v.menu_corner_radius = CornerRadius::same(16);
     v.extreme_bg_color = p.bg;
     v.faint_bg_color = p.bg;
-    v.text_edit_bg_color = Some(p.bg);
+    v.text_edit_bg_color = Some(p.track);
     v.override_text_color = Some(p.text);
     v.weak_text_color = Some(p.text_dim);
     v.selection.bg_fill = p.accent;
@@ -235,6 +235,21 @@ pub fn group(ui: &mut egui::Ui, title: &str, hint: Option<&str>, add: impl FnOnc
 /// One row of a group: the label on the left, the controls added by `add` on the right
 /// (laid out right to left, so the first widget added is the rightmost).
 pub fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    row_with(
+        ui,
+        |ui| {
+            ui.label(label);
+        },
+        add,
+    );
+}
+
+/// Like [`row`], with a widget instead of the label on the left.
+pub fn row_with(
+    ui: &mut egui::Ui,
+    left: impl FnOnce(&mut egui::Ui),
+    add: impl FnOnce(&mut egui::Ui),
+) {
     let p = palette(ui);
     let first = ui.min_size().y == 0.0;
     let size = egui::vec2(ui.available_width(), ROW_HEIGHT);
@@ -253,7 +268,7 @@ pub fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
                 );
             }
             ui.add_space(8.0);
-            ui.label(label);
+            left(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 add(ui);

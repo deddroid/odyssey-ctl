@@ -61,23 +61,21 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "Avvia ridotto nel tray",
     ),
     ("row.autostart", "Start at login", "Avvia all'accesso"),
-    (
-        "card.save_preset",
-        "Save the current state",
-        "Salva lo stato attuale",
-    ),
-    (
-        "card.save_preset.hint",
-        "Stores picture, game and lighting settings as they are now. Input and OSD language are not included.",
-        "Memorizza le impostazioni di immagine, gioco e luci come sono adesso. Ingresso e lingua dell'OSD non sono inclusi.",
-    ),
-    (
-        "preset_name",
-        "Preset name, e.g. Night",
-        "Nome del preset, es. Notte",
-    ),
-    ("save", "Save", "Salva"),
     ("card.presets", "Your presets", "I tuoi preset"),
+    (
+        "presets.add",
+        "New preset from the current settings",
+        "Nuovo preset dalle impostazioni attuali",
+    ),
+    ("add", "Add", "Aggiungi"),
+    ("presets.default_name", "Preset {n}", "Preset {n}"),
+    ("apps.pick", "Choose a window", "Scegli una finestra"),
+    (
+        "apps.filter",
+        "Filter, or type a class",
+        "Filtra, o scrivi una classe",
+    ),
+    ("apps.use_text", "Use “{text}”", "Usa “{text}”"),
     (
         "card.presets.hint",
         "Applying a preset changes only the settings that differ from the monitor.",
@@ -121,11 +119,6 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "Installa un piccolo script KWin che comunica a quest'app la finestra attiva; richiede KDE Plasma 6.",
     ),
     ("row.active_window", "Active window", "Finestra attiva"),
-    (
-        "apps.class",
-        "Window class, e.g. steam_app_*",
-        "Classe della finestra, es. steam_app_*",
-    ),
     ("apps.add", "Add rule", "Aggiungi regola"),
     ("apps.new", "New rule", "Nuova regola"),
     (
@@ -134,12 +127,6 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "Senza regola corrispondente",
     ),
     ("apps.keep", "Leave as it is", "Lascia com'è"),
-    (
-        "apps.use_active",
-        "Use active window",
-        "Usa la finestra attiva",
-    ),
-    ("apps.rule", "Rule {n}", "Regola {n}"),
     (
         "preset_saved",
         "Preset “{name}” saved.",

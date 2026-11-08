@@ -145,10 +145,10 @@ scrive una volta sola.
   poi `systemctl --user enable --now odyssey-ctl-night.timer`).
 - **Per applicazione (KDE Plasma 6):** nell'app, Preset → Per applicazione, attiva *Segui la
   finestra attiva*. Installa un piccolo script KWin che comunica all'app la finestra attiva via
-  D-Bus (una chiamata per cambio di fuoco, niente polling). Aggiungi una regola per classe di
-  finestra (la riga *Finestra attiva* la mostra; `*` e `?` sono jolly) con il preset da applicare,
-  e scegli il preset a cui tornare quando prende il fuoco una finestra senza regola. Le regole
-  stanno in `presets.toml` (`[[app]]` e `app_default`).
+  D-Bus (una chiamata per cambio di fuoco, niente polling). Aggiungi una regola scegliendo una
+  finestra dall'elenco di quelle aperte, o scrivendo un modello di classe (`*` e `?` sono jolly),
+  con il preset da applicare; scegli il preset a cui tornare quando prende il fuoco una finestra
+  senza regola. Le regole stanno in `presets.toml` (`[[app]]` e `app_default`).
 - **Al ripristino dalla sospensione:**
   [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume) è un gancio di
   systemd-sleep che applica un preset qualche secondo dopo il ripristino, come l'utente indicato in

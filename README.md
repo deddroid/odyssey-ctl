@@ -141,10 +141,10 @@ The monitor is never polled: each hook writes once.
   `systemctl --user enable --now odyssey-ctl-night.timer`).
 - **Per application (KDE Plasma 6):** in the desktop app, Presets → Per application, switch on
   *Follow the active window*. It installs a small KWin script that reports the focused window to
-  the app over D-Bus (one call per focus change, no polling). Add a rule per window class (the
-  *Active window* row shows it; `*` and `?` are wildcards) and the preset to apply, and pick the
-  preset to return to when a window without a rule gets the focus. The rules live in
-  `presets.toml` (`[[app]]` and `app_default`).
+  the app over D-Bus (one call per focus change, no polling). Add a rule by picking a window
+  from the list of open ones, or by typing a class pattern (`*` and `?` are wildcards), and the
+  preset to apply; pick the preset to return to when a window without a rule gets the focus.
+  The rules live in `presets.toml` (`[[app]]` and `app_default`).
 - **After suspend:** [`packaging/systemd/odyssey-ctl-resume`](packaging/systemd/odyssey-ctl-resume)
   is a systemd-sleep hook that applies a preset a few seconds after resume, as the user named in
   `/etc/odyssey-ctl/resume.conf`; the comments at the top show how to install it (root).

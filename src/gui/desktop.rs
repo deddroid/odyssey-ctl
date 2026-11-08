@@ -31,6 +31,8 @@ pub enum Cmd {
         class: String,
         title: String,
     },
+    /// The application windows open right now (class and title), one entry per class.
+    Windows(Vec<(String, String)>),
 }
 
 /// Menu labels in the user's language.
@@ -53,6 +55,8 @@ pub struct Shell {
     pub preset_requests: Mutex<Vec<String>>,
     /// Class and title of the last application window that got the focus (not this one).
     pub last_window: Mutex<Option<(String, String)>>,
+    /// Application windows open right now, one per class, for the rule picker.
+    pub open_windows: Mutex<Vec<(String, String)>>,
 }
 
 /// D-Bus name, object path and interface of the window service the KWin script calls.
@@ -244,6 +248,16 @@ pub fn spawn_window_service(tx: Sender<Cmd>) {
         fn window_activated(&self, class: String, title: String) {
             // The receiver only disappears at shutdown.
             let _ = self.tx.send(Cmd::Window { class, title });
+        }
+
+        /// One window per line as `class<US>title` (see the KWin script).
+        fn windows(&self, list: String) {
+            let windows = list
+                .lines()
+                .filter_map(|l| l.split_once('\u{1f}'))
+                .map(|(c, t)| (c.to_string(), t.to_string()))
+                .collect();
+            let _ = self.tx.send(Cmd::Windows(windows));
         }
     }
 

@@ -119,6 +119,15 @@ fn main() -> eframe::Result {
             for cmd in rx {
                 let ctx = shell.ctx.lock().ok().and_then(|c| c.clone());
                 let cmd = match cmd {
+                    Cmd::Windows(list) => {
+                        if let Ok(mut open) = shell.open_windows.lock() {
+                            *open = list;
+                        }
+                        if let Some(ctx) = &ctx {
+                            ctx.request_repaint();
+                        }
+                        continue;
+                    }
                     Cmd::Window { class, title } => {
                         if class == desktop::OWN_WINDOW_CLASS {
                             continue;
@@ -158,7 +167,7 @@ fn main() -> eframe::Result {
                         }
                         ctx.request_repaint();
                     }
-                    (Cmd::Window { .. }, _) => unreachable!("handled above"),
+                    (Cmd::Window { .. } | Cmd::Windows(_), _) => unreachable!("handled above"),
                     (cmd, None) => {
                         if main_tx.send(cmd).is_err() {
                             return;
@@ -188,7 +197,7 @@ fn main() -> eframe::Result {
         match main_rx.recv() {
             Ok(Cmd::Show) => visible = true,
             Ok(Cmd::Preset(name)) => apply_preset_headless(args.bus, &name),
-            Ok(Cmd::Window { .. }) => {}
+            Ok(Cmd::Window { .. } | Cmd::Windows(_)) => {}
             Ok(Cmd::Quit) | Err(_) => return Ok(()),
         }
     }
