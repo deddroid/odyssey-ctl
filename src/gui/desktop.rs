@@ -27,11 +27,13 @@ pub enum Cmd {
     /// Apply the preset with this name.
     Preset(String),
     /// A window got the focus (class and title), reported by the KWin script.
+    #[cfg(target_os = "linux")]
     Window {
         class: String,
         title: String,
     },
     /// The application windows open right now (class and title), one entry per class.
+    #[cfg(target_os = "linux")]
     Windows(Vec<(String, String)>),
 }
 
@@ -54,15 +56,20 @@ pub struct Shell {
     /// Presets chosen from the tray while the window is open; the window applies them.
     pub preset_requests: Mutex<Vec<String>>,
     /// Class and title of the last application window that got the focus (not this one).
+    #[cfg(target_os = "linux")]
     pub last_window: Mutex<Option<(String, String)>>,
     /// Application windows open right now, one per class, for the rule picker.
+    #[cfg(target_os = "linux")]
     pub open_windows: Mutex<Vec<(String, String)>>,
 }
 
 /// D-Bus name, object path and interface of the window service the KWin script calls.
+#[cfg(target_os = "linux")]
 pub const WINDOW_SERVICE: &str = "io.github.deddroid.OdysseyCtl";
+#[cfg(target_os = "linux")]
 pub const WINDOW_PATH: &str = "/io/github/deddroid/OdysseyCtl";
 /// Window class of this application, as the compositor reports it.
+#[cfg(target_os = "linux")]
 pub const OWN_WINDOW_CLASS: &str = "odyssey-ctl";
 
 /// RGBA pixels of an embedded PNG.
@@ -281,8 +288,11 @@ pub fn spawn_window_service(tx: Sender<Cmd>) {
 #[cfg(not(target_os = "linux"))]
 pub fn spawn_window_service(_tx: Sender<Cmd>) {}
 
+#[cfg(target_os = "linux")]
 const KWIN_SCRIPT_ID: &str = "odyssey-ctl";
+#[cfg(target_os = "linux")]
 const KWIN_METADATA: &str = include_str!("../../packaging/kwin/odyssey-ctl/metadata.json");
+#[cfg(target_os = "linux")]
 const KWIN_MAIN_JS: &str = include_str!("../../packaging/kwin/odyssey-ctl/contents/code/main.js");
 
 /// Installs (or removes) the KWin script under `~/.local/share/kwin/scripts/` and switches it on

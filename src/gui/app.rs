@@ -18,7 +18,9 @@ use crate::i18n::{Lang, tr};
 use crate::settings::{Settings, ThemeChoice};
 use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
-use odyssey_ctl::presets::{AimSpot, AppRule, Preset, Presets};
+#[cfg(target_os = "linux")]
+use odyssey_ctl::presets::AppRule;
+use odyssey_ctl::presets::{AimSpot, Preset, Presets};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -109,10 +111,14 @@ pub struct App {
     focus_name: Option<usize>,
     /// Window class picked for a new per-application rule, the preset chosen for it and the
     /// text typed in the window picker.
+    #[cfg(target_os = "linux")]
     new_rule_class: String,
+    #[cfg(target_os = "linux")]
     new_rule_preset: usize,
+    #[cfg(target_os = "linux")]
     rule_filter: String,
     /// The window picker is open: its filter field took the focus when it opened.
+    #[cfg(target_os = "linux")]
     rule_picker_open: bool,
     /// Preset waiting for the second click on "Delete".
     confirm_delete: Option<usize>,
@@ -179,9 +185,13 @@ impl App {
             presets: Presets::load(),
             rename: None,
             focus_name: None,
+            #[cfg(target_os = "linux")]
             new_rule_class: String::new(),
+            #[cfg(target_os = "linux")]
             new_rule_preset: 0,
+            #[cfg(target_os = "linux")]
             rule_filter: String::new(),
+            #[cfg(target_os = "linux")]
             rule_picker_open: false,
             confirm_delete: None,
             bus,
