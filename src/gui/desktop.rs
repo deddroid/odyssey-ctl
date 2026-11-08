@@ -298,8 +298,9 @@ pub fn set_window_watch(enabled: bool) -> std::io::Result<()> {
         let changed = write_if_changed(&dir.join("metadata.json"), KWIN_METADATA)?
             | write_if_changed(&dir.join("contents/code/main.js"), KWIN_MAIN_JS)?;
         if changed {
-            // KWin only re-reads a script when it is switched off and on again.
-            kwin_plugin(false)?;
+            // KWin keeps running the old copy until the script is unloaded; `reconfigure`
+            // below loads the new one.
+            kwin_unload_script()?;
         }
         kwin_plugin(true)
     } else {
@@ -329,6 +330,23 @@ fn write_if_changed(path: &std::path::Path, content: &str) -> std::io::Result<bo
     }
     std::fs::write(path, content)?;
     Ok(true)
+}
+
+/// `org.kde.kwin.Scripting.unloadScript`: stops the running copy of the script.
+#[cfg(target_os = "linux")]
+fn kwin_unload_script() -> std::io::Result<()> {
+    use std::io::Error;
+    let connection = zbus::blocking::Connection::session().map_err(Error::other)?;
+    connection
+        .call_method(
+            Some("org.kde.KWin"),
+            "/Scripting",
+            Some("org.kde.kwin.Scripting"),
+            "unloadScript",
+            &(KWIN_SCRIPT_ID,),
+        )
+        .map_err(|e| Error::other(format!("KWin did not unload the script: {e}")))?;
+    Ok(())
 }
 
 /// `kwinrc [Plugins] odyssey-ctlEnabled=<enabled>`, then `org.kde.KWin.reconfigure`.

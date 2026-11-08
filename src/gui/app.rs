@@ -112,6 +112,8 @@ pub struct App {
     new_rule_class: String,
     new_rule_preset: usize,
     rule_filter: String,
+    /// The window picker is open: its filter field took the focus when it opened.
+    rule_picker_open: bool,
     /// Preset waiting for the second click on "Delete".
     confirm_delete: Option<usize>,
     /// Bus the worker opens (None = the first Samsung monitor).
@@ -180,6 +182,7 @@ impl App {
             new_rule_class: String::new(),
             new_rule_preset: 0,
             rule_filter: String::new(),
+            rule_picker_open: false,
             confirm_delete: None,
             bus,
             aim_position: None,
@@ -800,6 +803,7 @@ impl App {
                     |ui| {
                         let field = egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
+                            .align(egui::Align2::LEFT_CENTER)
                             .desired_width(200.0);
                         let r = ui.add(field);
                         if focus {
@@ -959,22 +963,25 @@ impl App {
         let mut chosen = None;
         let config =
             MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-        MenuButton::new(format!("{label}  ⌄"))
+        let (_, inner) = MenuButton::new(format!("{label}  ⌄"))
             .config(config)
             .ui(ui, |ui| {
-                ui.set_min_width(260.0);
+                ui.set_width(320.0);
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let hint = self.t("apps.filter");
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut self.rule_filter)
                         .hint_text(hint)
-                        .desired_width(f32::INFINITY),
+                        .align(egui::Align2::LEFT_CENTER)
+                        .margin(egui::Margin::symmetric(10, 6))
+                        .desired_width(300.0),
                 );
-                if !field.has_focus() && self.rule_filter.is_empty() {
+                if !self.rule_picker_open {
+                    // Just opened: type straight away.
+                    self.rule_picker_open = true;
                     field.request_focus();
                 }
                 let filter = self.rule_filter.trim().to_lowercase();
-                let mut shown = 0;
                 for (class, title) in windows {
                     if !filter.is_empty()
                         && !class.to_lowercase().contains(&filter)
@@ -982,7 +989,6 @@ impl App {
                     {
                         continue;
                     }
-                    shown += 1;
                     let text = format!("{class}\n{}", title.chars().take(48).collect::<String>());
                     let item = egui::Button::new(RichText::new(text).color(p.text))
                         .fill(Color32::TRANSPARENT)
@@ -993,7 +999,7 @@ impl App {
                         ui.close();
                     }
                 }
-                if shown == 0 && !filter.is_empty() {
+                if !filter.is_empty() {
                     let typed = self.rule_filter.trim().to_string();
                     let text = self.t("apps.use_text").replace("{text}", &typed);
                     let item = egui::Button::new(RichText::new(text).color(p.text))
@@ -1006,6 +1012,9 @@ impl App {
                     }
                 }
             });
+        if inner.is_none() {
+            self.rule_picker_open = false;
+        }
         if chosen.is_some() {
             self.rule_filter.clear();
         }
@@ -1110,6 +1119,14 @@ impl App {
                 }
                 if let Some(class) = self.window_picker(ui, &windows) {
                     self.new_rule_class = class;
+                }
+                if !self.new_rule_class.is_empty()
+                    && ui
+                        .small_button("✕")
+                        .on_hover_text(self.t("delete"))
+                        .clicked()
+                {
+                    self.new_rule_class.clear();
                 }
             });
         });
@@ -1357,7 +1374,9 @@ impl App {
             ui.add(
                 egui::TextEdit::singleline(&mut self.aim_name)
                     .hint_text(hint)
-                    .desired_width(110.0),
+                    .align(egui::Align2::LEFT_CENTER)
+                    .margin(egui::Margin::symmetric(10, 6))
+                    .desired_width(130.0),
             );
         });
         if !self.presets.aim.is_empty() {
