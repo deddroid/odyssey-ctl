@@ -110,7 +110,11 @@ pub struct App {
     /// Bus the worker opens (None = the first Samsung monitor).
     bus: Option<u32>,
     aim_position: Option<Position>,
+    /// The icon changed: read the position again, keeping the old one on screen meanwhile.
+    aim_refresh: bool,
     aim_border: Option<Border>,
+    /// The six icons (type A then B, each light blue, red, white) drawn on the screen pad.
+    aim_icons: Vec<egui::TextureHandle>,
     /// Coordinates being typed for the aim point.
     aim_target: Option<Position>,
     aim_steps: u16,
@@ -168,7 +172,9 @@ impl App {
             confirm_delete: None,
             bus,
             aim_position: None,
+            aim_refresh: false,
             aim_border: None,
+            aim_icons: aim_icon_textures(&cc.egui_ctx),
             aim_target: None,
             aim_steps: 10,
             aim_name: String::new(),
@@ -314,7 +320,7 @@ impl App {
                             self.reread(features::dependents(feature.name));
                             if feature.name == "aim-point" {
                                 // A new icon may reset the position: read it again when shown.
-                                self.aim_position = None;
+                                self.aim_refresh = true;
                             }
                         }
                         Err(e) => {
@@ -351,7 +357,7 @@ impl App {
                         let text = self
                             .t("aim.at")
                             .replace("{x}", &position.x.to_string())
-                            .replace("{y}", &position.y.to_string());
+                            .replace("{y}", &self.shown_y(position.y).to_string());
                         self.message = Some(Message::Info(text, Instant::now()));
                     }
                     self.aim_position = Some(position);
@@ -935,8 +941,14 @@ impl App {
     /// Screen outline to click on, arrows, coordinates, centre button and saved positions for
     /// the crosshair. Its position and border are read when first shown (stateful registers,
     /// so never with the other features).
+    /// Y as the GUI shows it: counted from the bottom of the allowed area (see `Border::flip_y`).
+    fn shown_y(&self, y: u16) -> u16 {
+        self.aim_border.map_or(y, |b| b.flip_y(y))
+    }
+
     fn aim_pad(&mut self, ui: &mut egui::Ui) {
-        if self.aim_position.is_none() && !self.busy() {
+        if (self.aim_position.is_none() || self.aim_refresh) && !self.busy() {
+            self.aim_refresh = false;
             self.request(Request::AimState);
         }
         let allowed = self.action_allowed("aim-move") && self.action_allowed("aim-position");
@@ -950,12 +962,20 @@ impl App {
         };
         let mut moved = None;
         let mut target = None;
+        let icon = self
+            .reading("aim-point")
+            .and_then(|v| aim::icon_parts(v.current))
+            .and_then(|(kind, colour)| {
+                self.aim_icons
+                    .get((kind * aim::ICON_COLOURS + colour) as usize)
+            })
+            .cloned();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             ui.add_enabled_ui(enabled, |ui| {
                 if let Some(b) = self.aim_border {
-                    if let Some(p) = screen_pad(ui, b, pos, self.aim_target) {
+                    if let Some(p) = screen_pad(ui, b, pos, self.aim_target, icon.as_ref()) {
                         target = Some(p);
                     }
                     ui.add_space(16.0);
@@ -998,22 +1018,24 @@ impl App {
                             gap(ui);
                             ui.end_row();
                         });
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
+                        // Typed or dragged coordinates are written as soon as they settle,
+                        // like a slider. Y is shown from the bottom up.
+                        let mut t = self.aim_target.unwrap_or(pos);
+                        let mut shown = self.shown_y(t.y);
+                        ui.label(dim("X"));
+                        let rx = ui.add(egui::DragValue::new(&mut t.x).range(0..=aim::MAX_COORD));
+                        ui.label(dim("Y"));
+                        let ry = ui.add(egui::DragValue::new(&mut shown).range(0..=aim::MAX_COORD));
+                        t.y = self.shown_y(shown);
+                        ui.add_space(8.0);
                         ui.label(dim(self.t("aim.steps")));
                         let steps: Vec<(u16, String)> =
                             [1u16, 10, 50].map(|n| (n, n.to_string())).into();
                         if let Some(n) = theme::choice(ui, "aim-steps", self.aim_steps, &steps) {
                             self.aim_steps = n;
                         }
-                    });
-                    ui.horizontal(|ui| {
-                        // Typed or dragged coordinates are written as soon as they settle,
-                        // like a slider.
-                        let mut t = self.aim_target.unwrap_or(pos);
-                        ui.label(dim("X"));
-                        let rx = ui.add(egui::DragValue::new(&mut t.x).range(0..=aim::MAX_COORD));
-                        ui.label(dim("Y"));
-                        let ry = ui.add(egui::DragValue::new(&mut t.y).range(0..=aim::MAX_COORD));
                         let dragging = rx.dragged() || ry.dragged();
                         let settled = rx.drag_stopped()
                             || ry.drag_stopped()
@@ -1067,7 +1089,7 @@ impl App {
                         x: spot.x,
                         y: spot.y,
                     };
-                    let text = format!("{} ({}, {})", spot.name, spot.x, spot.y);
+                    let text = format!("{} ({}, {})", spot.name, spot.x, self.shown_y(spot.y));
                     let selected = here == pos;
                     let button = egui::Button::new(RichText::new(text).color(if selected {
                         Color32::WHITE
@@ -1471,6 +1493,7 @@ fn screen_pad(
     border: Border,
     pos: Position,
     draft: Option<Position>,
+    icon: Option<&egui::TextureHandle>,
 ) -> Option<Position> {
     let size = Vec2::new(256.0, 144.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -1511,10 +1534,29 @@ fn screen_pad(
         painter.circle_stroke(to_pad(d), 5.0, Stroke::new(1.0, p.warn));
     }
     let c = to_pad(pos);
-    let arm = Vec2::new(11.0, 0.0);
-    painter.line_segment([c - arm, c + arm], Stroke::new(1.5, p.accent));
-    painter.line_segment([c - arm.yx(), c + arm.yx()], Stroke::new(1.5, p.accent));
-    painter.circle_stroke(c, 6.0, Stroke::new(2.0, p.accent));
+    match icon {
+        Some(tex) => {
+            // The real crosshair, 28 px tall, dimmed with the rest when disabled.
+            let size = tex.size_vec2() * (28.0 / tex.size_vec2().y);
+            let tint = if ui.is_enabled() {
+                Color32::WHITE
+            } else {
+                Color32::WHITE.gamma_multiply(0.5)
+            };
+            painter.image(
+                tex.id(),
+                egui::Rect::from_center_size(c, size),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                tint,
+            );
+        }
+        None => {
+            let arm = Vec2::new(11.0, 0.0);
+            painter.line_segment([c - arm, c + arm], Stroke::new(1.5, p.accent));
+            painter.line_segment([c - arm.yx(), c + arm.yx()], Stroke::new(1.5, p.accent));
+            painter.circle_stroke(c, 6.0, Stroke::new(2.0, p.accent));
+        }
+    }
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     }
@@ -1528,6 +1570,26 @@ fn screen_pad(
         x: border.x + (fx * f32::from(border.width)).round() as u16,
         y: border.y + (fy * f32::from(border.height)).round() as u16,
     })
+}
+
+/// The crosshair images in `ED` value order (1..=6), uploaded once.
+fn aim_icon_textures(ctx: &egui::Context) -> Vec<egui::TextureHandle> {
+    const ICONS: [(&str, &[u8]); 6] = [
+        ("a-blue", include_bytes!("../../assets/aim/a-blue.png")),
+        ("a-red", include_bytes!("../../assets/aim/a-red.png")),
+        ("a-white", include_bytes!("../../assets/aim/a-white.png")),
+        ("b-blue", include_bytes!("../../assets/aim/b-blue.png")),
+        ("b-red", include_bytes!("../../assets/aim/b-red.png")),
+        ("b-white", include_bytes!("../../assets/aim/b-white.png")),
+    ];
+    ICONS
+        .iter()
+        .filter_map(|(name, bytes)| {
+            let (rgba, w, h) = desktop::decode_png(bytes)?;
+            let image = ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+            Some(ctx.load_texture(format!("aim-{name}"), image, egui::TextureOptions::LINEAR))
+        })
+        .collect()
 }
 
 impl eframe::App for App {

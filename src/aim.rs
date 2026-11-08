@@ -109,6 +109,14 @@ pub struct Border {
 }
 
 impl Border {
+    /// The same row counted from the bottom of the border: the GUI shows Y like a Cartesian
+    /// axis (0 at the bottom) while the firmware counts from the top. Its own inverse.
+    pub fn flip_y(&self, y: u16) -> u16 {
+        let top = i32::from(self.y);
+        let bottom = top + i32::from(self.height) - 1;
+        (top + bottom - i32::from(y)).clamp(0, i32::from(MAX_COORD)) as u16
+    }
+
     pub fn center(&self) -> Position {
         Position {
             x: self.x + self.width / 2,
@@ -260,6 +268,19 @@ mod tests {
             let (k, c) = icon_parts(v).unwrap();
             assert_eq!(icon_value(k, c), v);
         }
+    }
+
+    #[test]
+    fn flip_y_mirrors_inside_the_border() {
+        let b = Border {
+            x: 35,
+            y: 36,
+            width: 1629,
+            height: 407,
+        };
+        assert_eq!(b.flip_y(36), 442);
+        assert_eq!(b.flip_y(442), 36);
+        assert_eq!(b.flip_y(b.flip_y(239)), 239);
     }
 
     #[test]
