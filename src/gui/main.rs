@@ -115,6 +115,7 @@ fn main() -> eframe::Result {
         let shell = shell.clone();
         std::thread::spawn(move || {
             // Preset last applied for a window, so a focus change inside the same rule is free.
+            #[cfg(target_os = "linux")]
             let mut window_preset: Option<String> = None;
             for cmd in rx {
                 let ctx = shell.ctx.lock().ok().and_then(|c| c.clone());
