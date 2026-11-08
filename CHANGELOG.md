@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
 ### Added
 - Per-application presets on KDE Plasma 6: Presets → Per application installs a KWin script
   that reports the focused window to the app over D-Bus; rules match the window class (and
@@ -26,6 +27,17 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - `serde`, `toml` and `dirs` are now always built in (the command line tool reads the presets
   file); the `gui` feature only adds the desktop app.
+- The release archive and the AUR packages ship the systemd templates (`systemd/`); the AUR
+  packages install the preset unit under `/usr/lib/systemd/user/`.
+
+### Removed
+- The name field and Save button at the top of the Presets page, replaced by the Add row.
+
+### Verified on hardware
+- G60SD, firmware 1006.0, KDE Plasma 6.8 Wayland: `preset save|apply`, `set brightness +5/-5`,
+  and the per-application rules (preset applied on focus, fallback on leaving and on the
+  desktop) were tried on the monitor. The systemd timer and the resume hook pass
+  `systemd-analyze verify` but were not run end to end.
 
 ## [0.3.0] - 2026-11-08
 
