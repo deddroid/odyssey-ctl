@@ -19,6 +19,22 @@ pub const MAX_COORD: u16 = 0x1FFF;
 /// Units one `EE` step moves the crosshair (verified on the G60SD).
 pub const STEP_UNITS: u16 = 2;
 
+/// The icon register `ED`: 0 is off, then type A and type B, each in light blue, red and white.
+pub const ICON_COLOURS: u16 = 3;
+
+/// Icon type (0 = A, 1 = B) and colour (0 light blue, 1 red, 2 white) of an `ED` value, when it
+/// is one of the six icons.
+pub fn icon_parts(value: u16) -> Option<(u16, u16)> {
+    (1..=2 * ICON_COLOURS)
+        .contains(&value)
+        .then(|| ((value - 1) / ICON_COLOURS, (value - 1) % ICON_COLOURS))
+}
+
+/// The `ED` value of an icon type and colour.
+pub fn icon_value(kind: u16, colour: u16) -> u16 {
+    kind * ICON_COLOURS + colour + 1
+}
+
 /// Minimum time between two `EE` steps: closer writes are partly dropped and hide the
 /// crosshair (verified on the G60SD).
 pub const STEP_PACING_MS: u64 = 500;
@@ -26,7 +42,12 @@ pub const STEP_PACING_MS: u64 = 500;
 impl Move {
     /// Where `steps` steps from `p` land, kept inside `border`.
     pub fn apply(self, p: Position, steps: u16, border: Border) -> Position {
-        let d = steps.saturating_mul(STEP_UNITS);
+        self.shift(p, steps.saturating_mul(STEP_UNITS), border)
+    }
+
+    /// `p` moved by `units` coordinate units, kept inside `border`.
+    pub fn shift(self, p: Position, units: u16, border: Border) -> Position {
+        let d = units;
         let (min_x, max_x) = (border.x, border.x + border.width.saturating_sub(1));
         let (min_y, max_y) = (border.y, border.y + border.height.saturating_sub(1));
         match self {
@@ -227,6 +248,18 @@ mod tests {
         assert_eq!(Move::Up.apply(p, 50, b), Position { x: 852, y: 139 });
         assert_eq!(Move::Up.apply(p, 500, b).y, 36);
         assert_eq!(Move::Right.apply(p, 5000, b).x, 35 + 1629 - 1);
+    }
+
+    #[test]
+    fn icon_values_split_into_type_and_colour() {
+        assert_eq!(icon_parts(0), None);
+        assert_eq!(icon_parts(1), Some((0, 0)));
+        assert_eq!(icon_parts(5), Some((1, 1)));
+        assert_eq!(icon_parts(7), None);
+        for v in 1..=6 {
+            let (k, c) = icon_parts(v).unwrap();
+            assert_eq!(icon_value(k, c), v);
+        }
     }
 
     #[test]

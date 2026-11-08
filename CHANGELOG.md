@@ -10,7 +10,10 @@ All notable changes to this project are documented here. The format follows
 - GUI restyle: light and dark palettes that follow the system theme, Inter and Rajdhani fonts,
   pages as grouped lists with the control on the right, option menus with a check mark instead
   of chip rows, sliders with an editable value, concentric corner radii. Screenshots are now saved
-  for both themes (`*_light.png`).
+  for both themes (`*_light.png`). The theme (system, light or dark) is chosen in Settings.
+- Aim point in the GUI: the icon is chosen as type (A or B) and colour; the arrows sit around
+  the Centre button and move by exactly the chosen number of units (1, 10 or 50); typed
+  coordinates are written as soon as they settle, so the Apply button is gone.
 
 ## [0.2.0] - 2026-11-06
 

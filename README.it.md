@@ -22,7 +22,7 @@ reverse engineering. Nessun componente del software Samsung è incluso.
   nel tray a finestra chiusa. Vengono scritte solo le impostazioni diverse.
 - Ogni scrittura viene riletta dal monitor; le voci che il monitor dichiara non disponibili (per
   esempio con Eye Saver attivo) sono mostrate come tali e mai scritte.
-- Inglese e italiano; l'app segue la lingua e il tema di sistema (chiaro e scuro).
+- Inglese e italiano; l'app segue la lingua e il tema di sistema (chiaro o scuro, o scegli tu nelle Impostazioni).
 - Nessuna lettura in background: il monitor viene letto all'apertura e premendo Aggiorna, così il
   suo menu continua a funzionare.
 

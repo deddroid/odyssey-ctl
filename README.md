@@ -21,7 +21,7 @@ it. Nothing from Samsung's software is included.
   tray icon with the window closed. Only the settings that differ are written.
 - Every write is read back from the monitor; settings the monitor reports as unavailable (for
   example while Eye Saver is on) are shown as such and never written.
-- English and Italian; the app follows the system language and theme (light and dark).
+- English and Italian; the app follows the system language and theme (light or dark, or pick one in Settings).
 - No background polling: the monitor is read when you open the app or press Refresh, so its own
   menu keeps working.
 

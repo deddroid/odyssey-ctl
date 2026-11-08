@@ -83,6 +83,11 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.interact_size.y = CONTROL_HEIGHT;
         s.spacing.menu_margin = egui::Margin::same(4);
         s.spacing.combo_width = 160.0;
+        // A solid bar keeps its own column, so it never covers the groups.
+        s.spacing.scroll = egui::style::ScrollStyle {
+            bar_outer_margin: 8.0,
+            ..egui::style::ScrollStyle::solid()
+        };
         s.text_styles.insert(TextStyle::Heading, title_font(26.0));
         s.text_styles
             .insert(TextStyle::Body, FontId::proportional(14.0));

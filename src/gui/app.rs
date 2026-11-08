@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, ColorImage, Layout, RichText, Stroke, Vec2};
 use odyssey_ctl::actions::DisplayInfo;
-use odyssey_ctl::aim::{Border, Move, Position};
+use odyssey_ctl::aim::{self, Border, Move, Position};
 use odyssey_ctl::caps::{Capabilities, Profile};
 use odyssey_ctl::ddc::VcpValue;
 use odyssey_ctl::features::{self, Feature};
@@ -16,7 +16,7 @@ use odyssey_ctl::presets as preset_logic;
 
 use crate::i18n::{Lang, tr};
 use crate::presets::{AimSpot, Preset, Presets};
-use crate::settings::Settings;
+use crate::settings::{Settings, ThemeChoice};
 use crate::theme::{self, dim, palette};
 use crate::worker::{Action, Reply, Request, Worker};
 
@@ -127,6 +127,8 @@ impl App {
         screenshots: Option<PathBuf>,
     ) -> Self {
         theme::apply(&cc.egui_ctx);
+        let settings = Settings::load();
+        cc.egui_ctx.set_theme(settings.theme.preference());
         if let Ok(mut ctx) = shell.ctx.lock() {
             *ctx = Some(cc.egui_ctx.clone());
         }
@@ -150,7 +152,7 @@ impl App {
         let mut app = App {
             shell,
             worker: Worker::spawn(cc.egui_ctx.clone(), bus),
-            settings: Settings::load(),
+            settings,
             page: Page::Picture,
             name: None,
             caps: None,
@@ -563,9 +565,19 @@ impl App {
 
     // ---- controls ----------------------------------------------------------
 
-    /// The right control for a feature (chips, toggle, slider or list), with the lock and
+    /// The right control for a feature (menu, toggle or slider), with the lock and
     /// "disabled now" states. Writes go to the worker.
     fn control(&mut self, ui: &mut egui::Ui, name: &str) {
+        self.control_with(ui, name, Self::editor);
+    }
+
+    /// Like `control`, with a custom editor for the feature's value.
+    fn control_with(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        editor: fn(&mut Self, &mut egui::Ui, &'static Feature, VcpValue) -> Option<u16>,
+    ) {
         let f = features::find(name).expect("pages use known features");
         let allowed = f.status.safe_to_write() || self.settings.allow_unverified;
         let enabled = allowed && !self.writing();
@@ -581,7 +593,7 @@ impl App {
                 ui.label(dim(self.t("disabled_now")));
             }
             Some(Ok(v)) => {
-                ui.add_enabled_ui(enabled, |ui| write = self.editor(ui, f, v));
+                ui.add_enabled_ui(enabled, |ui| write = editor(self, ui, f, v));
             }
         }
         if !allowed {
@@ -635,6 +647,45 @@ impl App {
         }
         ui.label(dim(format!("{} {:#06x}", self.t("raw_value"), v.current)));
         None
+    }
+
+    /// Aim point icon as "off / type A / type B"; a type switched on keeps the current colour.
+    fn aim_type_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        _f: &'static Feature,
+        v: VcpValue,
+    ) -> Option<u16> {
+        let parts = aim::icon_parts(v.current);
+        let options = [
+            (0u16, self.t("v.off")),
+            (1, self.t("v.type-a")),
+            (2, self.t("v.type-b")),
+        ];
+        let selected = parts.map_or(0, |(kind, _)| kind + 1);
+        let kind = theme::choice(ui, "aim-type", selected, &options)?;
+        let colour = parts.map_or(0, |(_, c)| c);
+        Some(if kind == 0 {
+            0
+        } else {
+            aim::icon_value(kind - 1, colour)
+        })
+    }
+
+    fn aim_colour_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        _f: &'static Feature,
+        v: VcpValue,
+    ) -> Option<u16> {
+        let (kind, colour) = aim::icon_parts(v.current)?;
+        let options = [
+            (0u16, self.t("v.light-blue")),
+            (1, self.t("v.red")),
+            (2, self.t("v.white")),
+        ];
+        let c = theme::choice(ui, "aim-colour", colour, &options)?;
+        Some(aim::icon_value(kind, c))
     }
 
     fn feature_row(&mut self, ui: &mut egui::Ui, name: &str) {
@@ -842,11 +893,18 @@ impl App {
         });
         let (title, hint) = (self.t("card.aim"), self.t("card.aim.hint"));
         theme::group(ui, &title, Some(&hint), |ui| {
-            self.feature_row(ui, "aim-point");
+            let label = self.t("aim.type");
+            theme::row(ui, &label, |ui| {
+                self.control_with(ui, "aim-point", Self::aim_type_editor)
+            });
             let shown = self
                 .reading("aim-point")
-                .is_some_and(|v| v.current != 0 && !features::is_disabled(v.current, v.max));
+                .is_some_and(|v| aim::icon_parts(v.current).is_some());
             if shown {
+                let label = self.t("row.colour");
+                theme::row(ui, &label, |ui| {
+                    self.control_with(ui, "aim-point", Self::aim_colour_editor)
+                });
                 self.aim_pad(ui);
             }
         });
@@ -892,13 +950,6 @@ impl App {
         };
         let mut moved = None;
         let mut target = None;
-        let steps: Vec<(u16, String)> = [1u16, 10, 50].map(|n| (n, n.to_string())).into();
-        let label = self.t("aim.steps");
-        theme::row(ui, &label, |ui| {
-            if let Some(n) = theme::choice(ui, "aim-steps", self.aim_steps, &steps) {
-                self.aim_steps = n;
-            }
-        });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -911,48 +962,65 @@ impl App {
                 }
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
+                    // Arrows around the centre button, all the same size so they line up.
+                    let cell = Vec2::new(72.0, 30.0);
+                    let key = |ui: &mut egui::Ui, text: String| {
+                        ui.add_sized(cell, egui::Button::new(text)).clicked()
+                    };
+                    let gap = |ui: &mut egui::Ui| {
+                        ui.allocate_exact_size(cell, egui::Sense::hover());
+                    };
+                    egui::Grid::new("aim-dpad")
+                        .spacing([6.0, 6.0])
+                        .show(ui, |ui| {
+                            gap(ui);
+                            if key(ui, "▲".into()) {
+                                moved = Some(Move::Up);
+                            }
+                            gap(ui);
+                            ui.end_row();
+                            if key(ui, "◀".into()) {
+                                moved = Some(Move::Left);
+                            }
+                            if key(ui, self.t("aim.center"))
+                                && let Some(b) = self.aim_border
+                            {
+                                target = Some(b.center());
+                            }
+                            if key(ui, "▶".into()) {
+                                moved = Some(Move::Right);
+                            }
+                            ui.end_row();
+                            gap(ui);
+                            if key(ui, "▼".into()) {
+                                moved = Some(Move::Down);
+                            }
+                            gap(ui);
+                            ui.end_row();
+                        });
                     ui.horizontal(|ui| {
-                        ui.add_space(38.0);
-                        if ui.button(" ▲ ").clicked() {
-                            moved = Some(Move::Up);
+                        ui.label(dim(self.t("aim.steps")));
+                        let steps: Vec<(u16, String)> =
+                            [1u16, 10, 50].map(|n| (n, n.to_string())).into();
+                        if let Some(n) = theme::choice(ui, "aim-steps", self.aim_steps, &steps) {
+                            self.aim_steps = n;
                         }
                     });
                     ui.horizontal(|ui| {
-                        if ui.button(" ◀ ").clicked() {
-                            moved = Some(Move::Left);
-                        }
-                        ui.add_space(14.0);
-                        if ui.button(" ▶ ").clicked() {
-                            moved = Some(Move::Right);
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.add_space(38.0);
-                        if ui.button(" ▼ ").clicked() {
-                            moved = Some(Move::Down);
-                        }
-                    });
-                    ui.horizontal(|ui| {
+                        // Typed or dragged coordinates are written as soon as they settle,
+                        // like a slider.
                         let mut t = self.aim_target.unwrap_or(pos);
                         ui.label(dim("X"));
-                        ui.add(
-                            egui::DragValue::new(&mut t.x).range(0..=odyssey_ctl::aim::MAX_COORD),
-                        );
+                        let rx = ui.add(egui::DragValue::new(&mut t.x).range(0..=aim::MAX_COORD));
                         ui.label(dim("Y"));
-                        ui.add(
-                            egui::DragValue::new(&mut t.y).range(0..=odyssey_ctl::aim::MAX_COORD),
-                        );
+                        let ry = ui.add(egui::DragValue::new(&mut t.y).range(0..=aim::MAX_COORD));
+                        let dragging = rx.dragged() || ry.dragged();
+                        let settled = rx.drag_stopped()
+                            || ry.drag_stopped()
+                            || ((rx.changed() || ry.changed()) && !dragging);
                         self.aim_target = (t != pos).then_some(t);
-                        if ui
-                            .add_enabled(t != pos, egui::Button::new(self.t("aim.apply")))
-                            .clicked()
-                        {
+                        if settled && t != pos {
                             target = Some(t);
-                        }
-                        if let Some(b) = self.aim_border
-                            && ui.button(self.t("aim.center")).clicked()
-                        {
-                            target = Some(b.center());
                         }
                     });
                     if let Some(b) = self.aim_border {
@@ -1042,11 +1110,12 @@ impl App {
         }
         if let Some(dir) = moved {
             // Steps must be 500 ms apart or the crosshair hides, so arrows write the resulting
-            // position instead (immediate, and read back).
+            // position instead (immediate, and read back). `aim_steps` is in coordinate units.
             match self.aim_border {
-                Some(b) => target = Some(dir.apply(pos, self.aim_steps, b)),
+                Some(b) => target = Some(dir.shift(pos, self.aim_steps, b)),
                 None => {
-                    let steps = self.aim_steps;
+                    // Without the border only `EE` steps are possible (two units each).
+                    let steps = self.aim_steps.div_ceil(aim::STEP_UNITS);
                     self.act(Action::AimMove(dir, steps));
                 }
             }
@@ -1341,6 +1410,15 @@ impl App {
                     Lang::ALL.map(|l| (l, l.native_name().to_string())).into();
                 if let Some(l) = theme::choice(ui, "app-language", self.settings.language, &langs) {
                     self.settings.language = l;
+                    changed = true;
+                }
+            });
+            theme::row(ui, &self.t("row.theme"), |ui| {
+                let themes: Vec<(ThemeChoice, String)> =
+                    ThemeChoice::ALL.map(|t| (t, self.t(t.key()))).into();
+                if let Some(t) = theme::choice(ui, "app-theme", self.settings.theme, &themes) {
+                    self.settings.theme = t;
+                    ui.ctx().set_theme(t.preference());
                     changed = true;
                 }
             });
