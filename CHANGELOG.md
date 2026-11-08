@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ## [0.4.0] - 2026-11-08
+
 ### Added
 - Per-application presets on KDE Plasma 6: Presets → Per application installs a KWin script
   that reports the focused window to the app over D-Bus; rules match the window class (and
