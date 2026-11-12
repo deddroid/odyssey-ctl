@@ -15,7 +15,8 @@ it. Nothing from Samsung's software is included.
 
 - **Picture**: picture mode, brightness, contrast, sharpness, colour tone, white balance, Eye Saver.
 - **Game**: Black Equalizer, Virtual Aim Point with placement (arrows, coordinates, centre), Adaptive-Sync/FreeSync.
-- **Lighting**: Infinity Core Lighting on/off, effect and colour.
+- **Lighting**: Infinity Core Lighting on/off, effect and colour, and CoreSync (the monitor makes
+  all LEDs follow the colour at the centre of the screen; the edges do not count).
 - **Inputs & audio**: input source, volume, Picture-in-Picture (on/off, size, corner, inputs, sound), OSD language, PC/AV mode.
 - **Presets**: save the current state by name and get back to it with one click, also from the
   tray icon with the window closed. Only the settings that differ are written.
