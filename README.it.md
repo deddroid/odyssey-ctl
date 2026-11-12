@@ -16,7 +16,8 @@ reverse engineering. Nessun componente del software Samsung è incluso.
 - **Immagine**: modalità immagine, luminosità, contrasto, nitidezza, tonalità colore, bilanciamento
   del bianco, Eye Saver.
 - **Gioco**: Equalizzatore del nero, Mirino virtuale con posizionamento (frecce, coordinate, centratura), Adaptive-Sync/FreeSync.
-- **Luci**: Infinity Core Lighting acceso/spento, effetto e colore.
+- **Luci**: Infinity Core Lighting acceso/spento, effetto e colore, e CoreSync (il monitor fa
+  seguire a tutti i LED il colore al centro dello schermo; i bordi non contano).
 - **Ingressi e audio**: sorgente, volume, Picture-in-Picture (accensione, dimensione, angolo, ingressi, audio), lingua dell'OSD, modalità PC/AV.
 - **Preset**: salva lo stato attuale con un nome e torna indietro con un clic, anche dall'icona
   nel tray a finestra chiusa. Vengono scritte solo le impostazioni diverse.

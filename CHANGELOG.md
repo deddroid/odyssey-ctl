@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Verified on hardware
+- G60SD, firmware 1006.0: CoreSync takes its colour from the centre of the picture only (an
+  averaged central window; bands along the edges have no effect) and drives all LEDs with that
+  single colour. Documented in `docs/PROTOCOL.md`.
+
 ## [0.4.0] - 2026-11-08
 
 ### Added
