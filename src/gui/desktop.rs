@@ -160,7 +160,11 @@ pub fn spawn_tray(tx: Sender<Cmd>, labels: Labels) {
             let _ = self.tx.send(Cmd::Show);
         }
         fn menu_about_to_show(&mut self) {
-            // Presets may have been edited in the window since the last time.
+            // Settings and presets may have changed since the menu was last opened.
+            let lang = crate::settings::Settings::load().language;
+            self.labels.show = crate::i18n::tr(lang, "tray.show");
+            self.labels.quit = crate::i18n::tr(lang, "tray.quit");
+            self.labels.presets = crate::i18n::tr(lang, "nav.presets");
             self.preset_names = Presets::load().list.into_iter().map(|p| p.name).collect();
         }
         fn menu(&self) -> Vec<ksni::MenuItem<Self>> {

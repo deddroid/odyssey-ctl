@@ -212,7 +212,9 @@ fn main() -> eframe::Result {
         visible = false;
         match main_rx.recv() {
             Ok(Cmd::Show) => visible = true,
-            Ok(Cmd::Preset(name)) => apply_preset_headless(args.bus, &name),
+            Ok(Cmd::Preset(name)) => {
+                apply_preset_headless(Settings::load().resolve_bus(args.bus), &name)
+            }
             #[cfg(target_os = "linux")]
             Ok(Cmd::Window { .. } | Cmd::Windows(_)) => {}
             Ok(Cmd::Quit) | Err(_) => return Ok(()),

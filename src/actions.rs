@@ -314,6 +314,8 @@ pub struct DisplayInfo {
     pub bus: u32,
     pub name: String,
     pub samsung: bool,
+    /// Stable EDID identity; connector is used only when the display has no serial.
+    pub identity: String,
 }
 
 /// Monitors found on this machine (one fake monitor in demo mode).
@@ -323,6 +325,7 @@ pub fn discover() -> Vec<DisplayInfo> {
             bus: 0,
             name: "Odyssey G60SD (demo)".into(),
             samsung: true,
+            identity: "demo-monitor".into(),
         }];
     }
     discover_platform()
@@ -335,6 +338,23 @@ fn discover_platform() -> Vec<DisplayInfo> {
         .map(|d| DisplayInfo {
             bus: d.bus,
             samsung: d.edid.is_samsung(),
+            identity: format!(
+                "{}:{:04x}:{}",
+                d.edid.manufacturer,
+                d.edid.product_code,
+                d.edid
+                    .serial
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
+                    .or_else(
+                        || (d.edid.serial_number != 0).then(|| d.edid.serial_number.to_string())
+                    )
+                    .unwrap_or_else(|| format!(
+                        "connector:{}",
+                        d.connector.as_deref().unwrap_or("unknown")
+                    ))
+            ),
             name: format!(
                 "{} {}{}",
                 d.edid.manufacturer,

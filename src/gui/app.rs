@@ -147,6 +147,7 @@ impl App {
     ) -> Self {
         theme::apply(&cc.egui_ctx);
         let settings = Settings::load();
+        let bus = settings.resolve_bus(bus);
         cc.egui_ctx.set_theme(settings.theme.preference());
         if let Ok(mut ctx) = shell.ctx.lock() {
             *ctx = Some(cc.egui_ctx.clone());
@@ -234,6 +235,14 @@ impl App {
 
     /// Talks to another monitor: a new worker, and everything read so far is forgotten.
     fn switch_monitor(&mut self, ctx: &egui::Context, bus: u32) {
+        if let Some(display) = self
+            .displays
+            .as_ref()
+            .and_then(|list| list.iter().find(|d| d.bus == bus))
+        {
+            self.settings.preferred_monitor = Some(display.identity.clone());
+            self.save_settings();
+        }
         self.bus = Some(bus);
         self.worker = Worker::spawn(ctx.clone(), Some(bus));
         self.in_flight.clear();
@@ -1531,7 +1540,7 @@ impl App {
         let enabled = allowed && !self.writing();
         let mut cmd = None;
         let mut source = None;
-        let label = self.t("row.state");
+        let label = self.t("pip.mode");
         theme::row(ui, &label, |ui| {
             let mut on = status.on;
             ui.add_enabled_ui(enabled && status.pip_supported, |ui| {

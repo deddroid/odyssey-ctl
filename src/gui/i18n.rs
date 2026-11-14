@@ -7,17 +7,21 @@ use serde::{Deserialize, Serialize};
 pub enum Lang {
     En,
     It,
+    #[serde(rename = "pt-br")]
+    PtBr,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 2] = [Lang::En, Lang::It];
+    pub const ALL: [Lang; 3] = [Lang::En, Lang::It, Lang::PtBr];
 
     /// Italian when the system locale is Italian, English otherwise.
     pub fn from_env() -> Self {
         let locale = std::env::var("LC_ALL")
             .or_else(|_| std::env::var("LANG"))
             .unwrap_or_default();
-        if locale.starts_with("it") {
+        if locale.to_ascii_lowercase().starts_with("pt") {
+            Lang::PtBr
+        } else if locale.starts_with("it") {
             Lang::It
         } else {
             Lang::En
@@ -28,6 +32,7 @@ impl Lang {
         match self {
             Lang::En => "en",
             Lang::It => "it",
+            Lang::PtBr => "pt-br",
         }
     }
 
@@ -35,6 +40,7 @@ impl Lang {
         match self {
             Lang::En => "English",
             Lang::It => "Italiano",
+            Lang::PtBr => "Português (Brasil)",
         }
     }
 }
@@ -276,6 +282,7 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "A second input in a window. While it is on the monitor locks several game and picture settings.",
         "Un secondo ingresso in una finestra. Finché è attivo il monitor blocca varie impostazioni di gioco e immagine.",
     ),
+    ("pip.mode", "PIP Mode", "Modalità PIP"),
     ("pip.size", "Window size", "Dimensione finestra"),
     ("pip.corner", "Corner", "Angolo"),
     ("pip.corner.0", "Top left", "In alto a sinistra"),
@@ -462,12 +469,15 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("v.hdmi2", "HDMI 2", "HDMI 2"),
 ];
 
+include!("pt_br.rs");
+
 /// Translated string for `key`; the key itself when it is missing.
 pub fn tr(lang: Lang, key: &str) -> String {
     match STRINGS.iter().find(|(k, _, _)| *k == key) {
         Some((_, en, it)) => match lang {
             Lang::En => en,
             Lang::It => it,
+            Lang::PtBr => pt_br(key).unwrap_or(en),
         }
         .to_string(),
         None => key.to_string(),
@@ -490,6 +500,20 @@ mod tests {
             for (_, v) in f.values {
                 assert!(has(&format!("v.{v}")), "v.{v}");
             }
+        }
+    }
+
+    #[test]
+    fn brazilian_portuguese_covers_all_strings_and_preserves_placeholders() {
+        for (key, en, _) in STRINGS {
+            let translated = pt_br(key).unwrap_or_else(|| panic!("missing translation: {key}"));
+            let placeholders = |text: &str| {
+                text.split('{')
+                    .skip(1)
+                    .filter_map(|part| part.split_once('}').map(|(name, _)| name.to_owned()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(placeholders(en), placeholders(translated), "{key}");
         }
     }
 
